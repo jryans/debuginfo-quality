@@ -137,8 +137,11 @@ fn write_stats<W: io::Write>(mut w: W, stats: &VariableStats, base_stats: Option
     }
 }
 
-fn write_stats_label<W: io::Write>(mut w: W, label: &str, stats: &VariableStats, base_stats: Option<&VariableStats>) {
+fn write_stats_label<W: io::Write>(mut w: W, label: &str, stats: &VariableStats, base_stats: Option<&VariableStats>, opt: &Opt) {
     write!(w, "{}", label).unwrap();
+    if opt.functions || opt.variables {
+        write!(&mut w, "\t\t").unwrap();
+    }
     write_stats(w, stats, base_stats);
 }
 
@@ -219,6 +222,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut stdout_locked = stdout.lock();
     let mut w = BufWriter::new(&mut stdout_locked);
 
+    if stats.opt.functions || stats.opt.variables {
+        write!(&mut w, "\t\t")?;
+    }
     if base_stats.is_some() {
         writeln!(&mut w, "\tDef\tScope\tFraction\tBaseDef\tBaseScope\tBaseFraction\tFinal")?;
     } else {
@@ -254,15 +260,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         writeln!(&mut w)?;
     }
     if !stats.opt.only_locals {
-        write_stats_label(&mut w, "params", &stats.bundle.parameters, base_stats.as_ref().map(|b| &b.bundle.parameters));
+        write_stats_label(&mut w, "params", &stats.bundle.parameters, base_stats.as_ref().map(|b| &b.bundle.parameters), &stats.opt);
     }
     if !stats.opt.only_parameters {
-        write_stats_label(&mut w, "vars", &stats.bundle.variables, base_stats.as_ref().map(|b| &b.bundle.variables));
+        write_stats_label(&mut w, "vars", &stats.bundle.variables, base_stats.as_ref().map(|b| &b.bundle.variables), &stats.opt);
     }
     if !stats.opt.only_locals && !stats.opt.only_parameters {
         let all = stats.bundle.variables + stats.bundle.parameters;
         let base_all = base_stats.as_ref().map(|b| b.bundle.variables.clone() + b.bundle.parameters.clone());
-        write_stats_label(&mut w, "all", &all, base_all.as_ref());
+        write_stats_label(&mut w, "all", &all, base_all.as_ref(), &stats.opt);
     }
     Ok(())
 }
