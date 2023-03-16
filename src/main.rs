@@ -125,13 +125,14 @@ fn open<'a>(path: &Path, mmap: &'a memmap2::Mmap) -> object::File<'a> {
 
 fn write_stats<W: io::Write>(mut w: W, stats: &VariableStats, base_stats: Option<&VariableStats>) {
     if let Some(b) = base_stats {
-        writeln!(w, "\t{}\t{}\t{}\t{}\t{}\t{}\t{}", stats.instruction_bytes_covered,
+        writeln!(w, "\t{:12}\t{:12}\t{:12.5}\t{:12}\t{:12}\t{:12.5}\t{:12.5}",
+                 stats.instruction_bytes_covered,
                  stats.instruction_bytes_in_scope,
                  stats.fraction_covered(), b.instruction_bytes_covered,
                  b.instruction_bytes_in_scope,
                  b.fraction_covered(), stats.fraction_covered() - b.fraction_covered()).unwrap();
     } else {
-        writeln!(w, "\t{}\t{}\t{}", stats.instruction_bytes_covered,
+        writeln!(w, "\t{:12}\t{:12}\t{:12.5}", stats.instruction_bytes_covered,
                  stats.instruction_bytes_in_scope,
                  stats.fraction_covered()).unwrap();
     }
@@ -226,9 +227,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         write!(&mut w, "\t\t")?;
     }
     if base_stats.is_some() {
-        writeln!(&mut w, "\tCovered\tScope\tFraction\tBaseCovered\tBaseScope\tBaseFraction\tFinal")?;
+        writeln!(&mut w, "\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}",
+                 "Cov (B)", "Scope (B)", "CB / SB",
+                 "BaseCov (B)", "BaseScope (B)", "BCB / BSB",
+                 "Ratio Diff")?;
     } else {
-        writeln!(&mut w, "\tCovered\tScope\tFraction")?;
+        writeln!(&mut w, "\t{:12}\t{:12}\t{:12}", "Cov (B)", "Scope (B)", "CB / SB")?;
     }
     writeln!(&mut w)?;
     if stats.opt.functions || stats.opt.variables {
