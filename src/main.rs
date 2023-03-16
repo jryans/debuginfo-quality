@@ -125,15 +125,15 @@ fn open<'a>(path: &Path, mmap: &'a memmap2::Mmap) -> object::File<'a> {
 
 fn write_stats<W: io::Write>(mut w: W, stats: &VariableStats, base_stats: Option<&VariableStats>) {
     if let Some(b) = base_stats {
-        writeln!(w, "\t{}\t{}\t{}\t{}\t{}\t{}\t{}", stats.instruction_bytes_defined,
+        writeln!(w, "\t{}\t{}\t{}\t{}\t{}\t{}\t{}", stats.instruction_bytes_covered,
                  stats.instruction_bytes_in_scope,
-                 stats.fraction_defined(), b.instruction_bytes_defined,
+                 stats.fraction_covered(), b.instruction_bytes_covered,
                  b.instruction_bytes_in_scope,
-                 b.fraction_defined(), stats.fraction_defined() - b.fraction_defined()).unwrap();
+                 b.fraction_covered(), stats.fraction_covered() - b.fraction_covered()).unwrap();
     } else {
-        writeln!(w, "\t{}\t{}\t{}", stats.instruction_bytes_defined,
+        writeln!(w, "\t{}\t{}\t{}", stats.instruction_bytes_covered,
                  stats.instruction_bytes_in_scope,
-                 stats.fraction_defined()).unwrap();
+                 stats.fraction_covered()).unwrap();
     }
 }
 
@@ -226,9 +226,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         write!(&mut w, "\t\t")?;
     }
     if base_stats.is_some() {
-        writeln!(&mut w, "\tDef\tScope\tFraction\tBaseDef\tBaseScope\tBaseFraction\tFinal")?;
+        writeln!(&mut w, "\tCovered\tScope\tFraction\tBaseCovered\tBaseScope\tBaseFraction\tFinal")?;
     } else {
-        writeln!(&mut w, "\tDef\tScope\tFraction")?;
+        writeln!(&mut w, "\tCovered\tScope\tFraction")?;
     }
     writeln!(&mut w)?;
     if stats.opt.functions || stats.opt.variables {
@@ -275,9 +275,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 fn goodness(&(ref a, ref a_base): &(FunctionStats, Option<&FunctionStats>)) -> (f64, i64) {
     (if let Some(a_base) = a_base.as_ref() {
-        a.stats.fraction_defined() - a_base.stats.fraction_defined()
+        a.stats.fraction_covered() - a_base.stats.fraction_covered()
     } else {
-        a.stats.fraction_defined()
+        a.stats.fraction_covered()
     }, -(a.stats.instruction_bytes_in_scope as i64))
 }
 
@@ -413,12 +413,12 @@ enum VarType {
 #[derive(Clone, Debug, Add, AddAssign, Default)]
 struct VariableStats {
     instruction_bytes_in_scope: u64,
-    instruction_bytes_defined: u64,
+    instruction_bytes_covered: u64,
 }
 
 impl VariableStats {
-    fn fraction_defined(&self) -> f64 {
-        (self.instruction_bytes_defined as f64)/(self.instruction_bytes_in_scope as f64)
+    fn fraction_covered(&self) -> f64 {
+        (self.instruction_bytes_covered as f64)/(self.instruction_bytes_in_scope as f64)
     }
 }
 
@@ -636,13 +636,13 @@ fn evaluate_info<'a>(
                 let in_scope = ranges_instruction_bytes(ranges);
                 VariableStats {
                     instruction_bytes_in_scope: in_scope,
-                    instruction_bytes_defined: in_scope,
+                    instruction_bytes_covered: in_scope,
                 }
             } else {
                 match entry.attr_value(gimli::DW_AT_location).unwrap() {
                     Some(AttributeValue::Exprloc(expr)) => {
                         let in_scope = ranges_instruction_bytes(ranges);
-                        let defined = if (no_entry_value || no_parameter_ref) &&
+                        let covered = if (no_entry_value || no_parameter_ref) &&
                                           !is_allowed_expression(expr.evaluation(unit.address_size(), unit.format()), no_entry_value, no_parameter_ref) {
                             0
                         } else {
@@ -650,7 +650,7 @@ fn evaluate_info<'a>(
                         };
                         VariableStats {
                             instruction_bytes_in_scope: in_scope,
-                            instruction_bytes_defined: defined,
+                            instruction_bytes_covered: covered,
                         }
                     }
                     Some(AttributeValue::LocationListsRef(loc)) => {
@@ -670,13 +670,13 @@ fn evaluate_info<'a>(
                         sort_nonoverlapping(&mut locations);
                         VariableStats {
                             instruction_bytes_in_scope: ranges_instruction_bytes(ranges),
-                            instruction_bytes_defined: ranges_overlap_instruction_bytes(ranges, &locations[..]),
+                            instruction_bytes_covered: ranges_overlap_instruction_bytes(ranges, &locations[..]),
                         }
                     }
                     None => {
                         VariableStats {
                             instruction_bytes_in_scope: ranges_instruction_bytes(ranges),
-                            instruction_bytes_defined: 0,
+                            instruction_bytes_covered: 0,
                         }
                     }
                     _ => panic!("Unknown DW_AT_location attribute at {}", to_ref_str(&unit, &entry)),
