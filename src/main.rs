@@ -249,12 +249,20 @@ fn main() -> Result<(), Box<dyn Error>> {
         for (function_stats, base_function_stats) in functions {
             if stats.opt.variables {
                 for v in function_stats.variables {
+                    let base_v = base_function_stats.and_then(|f| {
+                        let mut same_name = f.variables.iter().filter(|&bv| bv.name == v.name);
+                        if same_name.clone().count() == 1 {
+                            same_name.next()
+                        } else {
+                            None
+                        }
+                    });
                     write!(&mut w, "{}", &function_stats.name)?;
                     for inline in v.inlines {
                         write!(&mut w, ",{}", &inline)?;
                     }
                     write!(&mut w, ",{}@0x{:x}:0x{:x}", &v.name, function_stats.unit_offset, v.entry_offset)?;
-                    write_stats(&mut w, &v.stats, None);
+                    write_stats(&mut w, &v.stats, base_v.map(|bv| &bv.stats));
                 }
             } else {
                 write!(&mut w, "{}@0x{:x}:0x{:x}", &function_stats.name, function_stats.unit_offset, function_stats.entry_offset)?;
