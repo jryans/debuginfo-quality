@@ -5,7 +5,7 @@ extern crate cpp_demangle;
 extern crate derive_more;
 extern crate fallible_iterator;
 extern crate gimli;
-extern crate memmap;
+extern crate memmap2;
 extern crate object;
 extern crate rayon;
 extern crate regex;
@@ -25,7 +25,7 @@ use std::process;
 use cpp_demangle::*;
 use fallible_iterator::FallibleIterator;
 use gimli::{AttributeValue, CompilationUnitHeader, EndianSlice};
-use object::Object;
+use object::{Object, ObjectSection};
 use rayon::prelude::*;
 use regex::Regex;
 use structopt::StructOpt;
@@ -94,7 +94,7 @@ struct Opt {
     baseline: Option<PathBuf>,
 }
 
-fn map(path: &Path) -> memmap::Mmap {
+fn map(path: &Path) -> memmap2::Mmap {
     let file = match fs::File::open(path) {
         Ok(file) => file,
         Err(err) => {
@@ -106,7 +106,7 @@ fn map(path: &Path) -> memmap::Mmap {
             process::exit(1);
         }
     };
-    match unsafe { memmap::Mmap::map(&file) } {
+    match unsafe { memmap2::Mmap::map(&file) } {
         Ok(mmap) => mmap,
         Err(err) => {
             eprintln!("Failed to map file '{}': {}", path.display(), &err);
@@ -115,8 +115,8 @@ fn map(path: &Path) -> memmap::Mmap {
     }
 }
 
-fn open<'a>(path: &Path, mmap: &'a memmap::Mmap) -> object::File<'a> {
-    let file = match object::File::parse(&*mmap) {
+fn open<'a>(path: &Path, mmap: &'a memmap2::Mmap) -> object::File<'a> {
+    let file = match object::File::parse(&**mmap) {
         Ok(file) => file,
         Err(err) => {
             eprintln!("Failed to parse file '{}': {}", path.display(), err);
@@ -167,7 +167,10 @@ fn main() {
         'file: 'input,
         'a: 'file
     {
-        let data = file.section_data_by_name(S::section_name()).unwrap_or(Cow::Borrowed(&[]));
+        let data = match file.section_by_name(S::section_name()) {
+            Some(ref section) => section.uncompressed_data().unwrap_or(Cow::Borrowed(&[][..])),
+            None => Cow::Borrowed(&[][..]),
+        };
         let data_ref = (*arena.alloc(data)).borrow();
         S::from(gimli::EndianSlice::new(data_ref, gimli::LittleEndian))
     }

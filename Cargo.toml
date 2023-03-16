@@ -8,6 +8,7 @@ name = "debuginfo-quality"
 readme = "./README.md"
 repository = "https://github.com/rocallahan/debuginfo-quality"
 version = "0.1.0"
+edition = "2018"
 
 [dependencies]
 clap = "2.32.0"
@@ -15,8 +16,8 @@ cpp_demangle = { git = "https://github.com/khuey/cpp_demangle", branch = "downst
 fallible-iterator = "0.1.4"
 derive_more = "0.13.0"
 gimli = "0.16.1"
-memmap = "0.6"
-object = "0.10"
+memmap2 = "0.5.10"
+object = "0.30"
 rayon = "1.0"
 regex = "1"
 structopt = "0.2"
