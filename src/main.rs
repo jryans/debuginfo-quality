@@ -15,7 +15,7 @@ extern crate typed_arena;
 use std::borrow::{Borrow, Cow};
 use std::cmp::{max, min};
 use std::collections::HashMap;
-use std::error;
+use std::error::Error;
 use std::fs;
 use std::io::{self, BufWriter, Write};
 use std::iter::Iterator;
@@ -98,11 +98,7 @@ fn map(path: &Path) -> memmap2::Mmap {
     let file = match fs::File::open(path) {
         Ok(file) => file,
         Err(err) => {
-            eprintln!(
-                "Failed to open file '{}': {}",
-                path.display(),
-                error::Error::description(&err)
-            );
+            eprintln!("Failed to open file '{}': {}", path.display(), &err);
             process::exit(1);
         }
     };
@@ -146,7 +142,7 @@ fn write_stats_label<W: io::Write>(mut w: W, label: &str, stats: &VariableStats,
     write_stats(w, stats, base_stats);
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn Error>> {
     let opt = Opt::from_args();
     if opt.baseline.is_none() && (opt.no_entry_value_baseline || opt.no_parameter_ref_baseline) {
         eprintln!("Don't specify baseline options with no baseline!");
@@ -206,12 +202,12 @@ fn main() {
         let debug_info = &load_section(&arena, file);
         let debug_ranges = load_section(&arena, file);
         let debug_rnglists = load_section(&arena, file);
-        let rnglists = &gimli::RangeLists::new(debug_ranges, debug_rnglists).unwrap();
+        let rnglists = &gimli::RangeLists::new(debug_ranges, debug_rnglists)?;
         let debug_str = &load_section(&arena, file);
 
         let debug_loc = load_section(&arena, file);
         let debug_loclists = load_section(&arena, file);
-        let loclists = &gimli::LocationLists::new(debug_loc, debug_loclists).unwrap();
+        let loclists = &gimli::LocationLists::new(debug_loc, debug_loclists)?;
 
         let mut stats = Stats { bundle: StatsBundle::default(), opt: opt.clone(), output: Vec::new() };
         evaluate_info(debug_info, debug_abbrev, debug_str, rnglists, loclists, stats.opt.no_entry_value_baseline,
@@ -224,11 +220,11 @@ fn main() {
     let mut w = BufWriter::new(&mut stdout_locked);
 
     if base_stats.is_some() {
-        writeln!(&mut w, "\tDef\tScope\tFraction\tBaseDef\tBaseScope\tBaseFraction\tFinal").unwrap();
+        writeln!(&mut w, "\tDef\tScope\tFraction\tBaseDef\tBaseScope\tBaseFraction\tFinal")?;
     } else {
-        writeln!(&mut w, "\tDef\tScope\tFraction").unwrap();
+        writeln!(&mut w, "\tDef\tScope\tFraction")?;
     }
-    writeln!(&mut w).unwrap();
+    writeln!(&mut w)?;
     if stats.opt.functions || stats.opt.variables {
         let mut functions: Vec<(FunctionStats, Option<&FunctionStats>)> = if let Some(base) = base_stats.as_ref() {
             let mut base_functions = HashMap::new();
@@ -243,19 +239,19 @@ fn main() {
         for (function_stats, base_function_stats) in functions {
             if stats.opt.variables {
                 for v in function_stats.variables {
-                    write!(&mut w, "{}", &function_stats.name);
+                    write!(&mut w, "{}", &function_stats.name)?;
                     for inline in v.inlines {
-                        write!(&mut w, ",{}", &inline);
+                        write!(&mut w, ",{}", &inline)?;
                     }
-                    write!(&mut w, ",{}@0x{:x}:0x{:x}", &v.name, function_stats.unit_offset, v.entry_offset);
+                    write!(&mut w, ",{}@0x{:x}:0x{:x}", &v.name, function_stats.unit_offset, v.entry_offset)?;
                     write_stats(&mut w, &v.stats, None);
                 }
             } else {
-                write!(&mut w, "{}@0x{:x}:0x{:x}", &function_stats.name, function_stats.unit_offset, function_stats.entry_offset);
+                write!(&mut w, "{}@0x{:x}:0x{:x}", &function_stats.name, function_stats.unit_offset, function_stats.entry_offset)?;
                 write_stats(&mut w, &function_stats.stats, base_function_stats.map(|b| &b.stats));
             }
         }
-        writeln!(&mut w).unwrap();
+        writeln!(&mut w)?;
     }
     if !stats.opt.only_locals {
         write_stats_label(&mut w, "params", &stats.bundle.parameters, base_stats.as_ref().map(|b| &b.bundle.parameters));
@@ -268,6 +264,7 @@ fn main() {
         let base_all = base_stats.as_ref().map(|b| b.bundle.variables.clone() + b.bundle.parameters.clone());
         write_stats_label(&mut w, "all", &all, base_all.as_ref());
     }
+    Ok(())
 }
 
 fn goodness(&(ref a, ref a_base): &(FunctionStats, Option<&FunctionStats>)) -> (f64, i64) {
