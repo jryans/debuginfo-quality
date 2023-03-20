@@ -466,17 +466,17 @@ fn ranges_instruction_bytes(r: &[gimli::Range]) -> u64 {
     r.iter().fold(0, |sum, r| { sum + (r.end - r.begin) })
 }
 
-fn ranges_overlap_instruction_bytes(rs1: &[gimli::Range], rs2: &[gimli::Range]) -> u64 {
+fn ranges_overlap(rs1: &[gimli::Range], rs2: &[gimli::Range]) -> Vec<gimli::Range> {
     let mut iter1 = rs1.iter();
     let mut iter2 = rs2.iter();
     let mut r1_opt: Option<gimli::Range> = iter1.next().map(|r| *r);
     let mut r2_opt: Option<gimli::Range> = iter2.next().map(|r| *r);
-    let mut total = 0;
+    let mut result = Vec::new();
     while let (Some(r1), Some(r2)) = (r1_opt, r2_opt) {
         let overlap_start = max(r1.begin, r2.begin);
         let overlap_end = min(r1.end, r2.end);
         if overlap_start < overlap_end {
-            total += overlap_end - overlap_start;
+            result.push(gimli::Range { begin: overlap_start, end: overlap_end });
         }
         let new_min = overlap_end;
         r1_opt = if r1.end <= new_min {
@@ -490,7 +490,7 @@ fn ranges_overlap_instruction_bytes(rs1: &[gimli::Range], rs2: &[gimli::Range]) 
             Some(gimli::Range { begin: max(r2.begin, new_min), end: r2.end })
         };
     }
-    total
+    result
 }
 
 fn ranges_source_lines<R: Reader>(
@@ -781,11 +781,9 @@ fn evaluate_info<'a>(
                         sort_nonoverlapping(&mut locations);
                         VariableStats {
                             instruction_bytes_in_scope: ranges_instruction_bytes(ranges),
-                            instruction_bytes_covered: ranges_overlap_instruction_bytes(ranges, &locations[..]),
+                            instruction_bytes_covered: ranges_instruction_bytes(&ranges_overlap(ranges, &locations[..])),
                             source_lines_in_scope: ranges_source_lines(ranges, line_program.clone()),
-                            // TODO: Does this need to check overlap like the bytes version above
-                            // if the scope defined as multiple ranges...?
-                            source_lines_covered: ranges_source_lines(&locations[..], line_program.clone()),
+                            source_lines_covered: ranges_source_lines(&ranges_overlap(ranges, &locations[..]), line_program.clone()),
                         }
                     }
                     None => {
