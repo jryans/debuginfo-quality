@@ -506,7 +506,7 @@ fn ranges_source_lines<R: Reader>(
         // println!("Range: [{:#x}, {:#x})", range.begin, range.end);
         if opt_row.map_or(true, |row| row.address() != range.begin) {
             opt_row = Some(line_sm.run_to_address(&range.begin).unwrap()
-                                  .expect("Instruction should exist in line table").1);
+                                  .expect("Start of range should exist in line table").1);
         }
         let row = opt_row.unwrap();
         let mut last_line = None;
@@ -518,7 +518,7 @@ fn ranges_source_lines<R: Reader>(
         }
         loop {
             opt_row = Some(line_sm.next_row().unwrap()
-                                  .expect("Instruction should exist in line table").1);
+                                  .expect("Next row should exist in line table").1);
             let row = opt_row.unwrap();
             // The end of an instruction range is exclusive, stop when reached
             if row.address() == range.end {
