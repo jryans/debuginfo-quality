@@ -24,7 +24,7 @@ use std::process;
 
 use cpp_demangle::*;
 use fallible_iterator::FallibleIterator;
-use gimli::{AttributeValue, CompilationUnitHeader, EndianSlice, LineNumberRow};
+use gimli::{AttributeValue, CompilationUnitHeader, EndianSlice};
 use object::{Object, ObjectSection};
 use rayon::prelude::*;
 use regex::Regex;
@@ -498,28 +498,21 @@ fn ranges_source_lines<R: Reader>(
     line_program: gimli::IncompleteLineNumberProgram<R>,
 ) -> u64 {
     let mut line_sm = line_program.rows();
-    let mut opt_row: Option<&LineNumberRow> = None;
+    let mut row = line_sm.next_row().unwrap()
+                         .expect("Next row should exist in line table").1;
     // Instructions may mark out non-contiguous, overlapping source line ranges.
     // A source line set allows accurate counting even with overlaps.
     let mut source_line_set = BTreeSet::new();
     for range in ranges {
         // println!("Range: [{:#x}, {:#x})", range.begin, range.end);
-        if opt_row.map_or(true, |row| row.address() != range.begin) {
-            opt_row = Some(line_sm.run_to_address(&range.begin).unwrap()
-                                  .expect("Start of range should exist in line table").1);
-        }
-        let row = opt_row.unwrap();
         let mut last_line = None;
-        // TODO: Rearrange for less duplication
-        // println!("Line: {:#x} -> {:?}", row.address(), row.line());
-        if let Some(current_line) = row.line() {
-            source_line_set.insert(current_line);
-            last_line = Some(current_line);
-        }
         loop {
-            opt_row = Some(line_sm.next_row().unwrap()
-                                  .expect("Next row should exist in line table").1);
-            let row = opt_row.unwrap();
+            // Continue until we find a row for beginning of range (may not be exact match)
+            if row.address() < range.begin {
+                row = line_sm.next_row().unwrap()
+                             .expect("Next row should exist in line table").1;
+                continue;
+            }
             // The end of an instruction range is exclusive, stop when reached
             if row.address() >= range.end {
                 break;
@@ -537,6 +530,8 @@ fn ranges_source_lines<R: Reader>(
                 }
                 last_line = Some(current_line);
             }
+            row = line_sm.next_row().unwrap()
+                         .expect("Next row should exist in line table").1;
         }
     }
     // println!("Total: {}", source_line_set.len());
