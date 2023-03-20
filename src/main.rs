@@ -521,7 +521,7 @@ fn ranges_source_lines<R: Reader>(
                                   .expect("Next row should exist in line table").1);
             let row = opt_row.unwrap();
             // The end of an instruction range is exclusive, stop when reached
-            if row.address() == range.end {
+            if row.address() >= range.end {
                 break;
             }
             // println!("Line: {:#x} -> {:?}", row.address(), row.line());
