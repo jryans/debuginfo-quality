@@ -241,7 +241,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut w = BufWriter::new(&mut stdout_locked);
 
     if stats.opt.functions || stats.opt.variables {
-        write!(&mut w, "\t\t")?;
+        write!(&mut w, "\t\t\t\t")?;
     }
     if base_stats.is_some() {
         writeln!(&mut w,
@@ -279,30 +279,30 @@ fn main() -> Result<(), Box<dyn Error>> {
                             None
                         }
                     });
-                    write!(&mut w, "{}", &function_stats.name)?;
+                    write!(&mut w, "{:12.12}", &function_stats.name)?;
                     for inline in v.inlines {
                         write!(&mut w, ",{}", &inline)?;
                     }
-                    write!(&mut w, ",{}@0x{:x}:0x{:x}", &v.name, function_stats.unit_offset, v.entry_offset)?;
+                    write!(&mut w, ",{:12.12}@0x{:x}:0x{:x}", &v.name, function_stats.unit_offset, v.entry_offset)?;
                     write_stats(&mut w, &v.stats, base_v.map(|bv| &bv.stats));
                 }
             } else {
-                write!(&mut w, "{}@0x{:x}:0x{:x}", &function_stats.name, function_stats.unit_offset, function_stats.entry_offset)?;
+                write!(&mut w, "{:12.12}@0x{:x}:0x{:x}", &function_stats.name, function_stats.unit_offset, function_stats.entry_offset)?;
                 write_stats(&mut w, &function_stats.stats, base_function_stats.map(|b| &b.stats));
             }
         }
         writeln!(&mut w)?;
     }
     if !stats.opt.only_locals {
-        write_stats_label(&mut w, "params", &stats.bundle.parameters, base_stats.as_ref().map(|b| &b.bundle.parameters), &stats.opt);
+        write_stats_label(&mut w, "params\t\t", &stats.bundle.parameters, base_stats.as_ref().map(|b| &b.bundle.parameters), &stats.opt);
     }
     if !stats.opt.only_parameters {
-        write_stats_label(&mut w, "vars", &stats.bundle.variables, base_stats.as_ref().map(|b| &b.bundle.variables), &stats.opt);
+        write_stats_label(&mut w, "vars\t\t", &stats.bundle.variables, base_stats.as_ref().map(|b| &b.bundle.variables), &stats.opt);
     }
     if !stats.opt.only_locals && !stats.opt.only_parameters {
         let all = stats.bundle.variables + stats.bundle.parameters;
         let base_all = base_stats.as_ref().map(|b| b.bundle.variables.clone() + b.bundle.parameters.clone());
-        write_stats_label(&mut w, "all", &all, base_all.as_ref(), &stats.opt);
+        write_stats_label(&mut w, "all\t\t", &all, base_all.as_ref(), &stats.opt);
     }
     Ok(())
 }
