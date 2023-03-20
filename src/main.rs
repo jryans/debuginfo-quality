@@ -84,6 +84,9 @@ struct Opt {
     /// Languages to look at
     #[structopt(short = "l", long="language", raw(possible_values = "&Language::variants()", case_insensitive = "true"))]
     language: Option<Language>,
+    /// Output using tab-separated values (TSV) format
+    #[structopt(long="tsv")]
+    tsv: bool,
     /// File to analyze
     #[structopt(parse(from_os_str))]
     file: PathBuf,
@@ -155,8 +158,8 @@ fn write_stats<W: io::Write>(mut w: W, stats: &VariableStats, base_stats: Option
 
 fn write_stats_label<W: io::Write>(mut w: W, label: &str, stats: &VariableStats, base_stats: Option<&VariableStats>, opt: &Opt) {
     write!(w, "{}", label).unwrap();
-    if opt.functions || opt.variables {
-        write!(&mut w, "\t\t").unwrap();
+    if !opt.tsv && (opt.functions || opt.variables) {
+        write!(&mut w, "\t\t\t\t").unwrap();
     }
     write_stats(w, stats, base_stats);
 }
@@ -240,9 +243,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut stdout_locked = stdout.lock();
     let mut w = BufWriter::new(&mut stdout_locked);
 
-    if stats.opt.functions || stats.opt.variables {
+    if !stats.opt.tsv && (stats.opt.functions || stats.opt.variables) {
         write!(&mut w, "\t\t\t\t")?;
     }
+    write!(&mut w, "Name")?;
     if base_stats.is_some() {
         writeln!(&mut w,
                  "\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}\
@@ -294,15 +298,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         writeln!(&mut w)?;
     }
     if !stats.opt.only_locals {
-        write_stats_label(&mut w, "params\t\t", &stats.bundle.parameters, base_stats.as_ref().map(|b| &b.bundle.parameters), &stats.opt);
+        write_stats_label(&mut w, "params", &stats.bundle.parameters, base_stats.as_ref().map(|b| &b.bundle.parameters), &stats.opt);
     }
     if !stats.opt.only_parameters {
-        write_stats_label(&mut w, "vars\t\t", &stats.bundle.variables, base_stats.as_ref().map(|b| &b.bundle.variables), &stats.opt);
+        write_stats_label(&mut w, "vars", &stats.bundle.variables, base_stats.as_ref().map(|b| &b.bundle.variables), &stats.opt);
     }
     if !stats.opt.only_locals && !stats.opt.only_parameters {
         let all = stats.bundle.variables + stats.bundle.parameters;
         let base_all = base_stats.as_ref().map(|b| b.bundle.variables.clone() + b.bundle.parameters.clone());
-        write_stats_label(&mut w, "all\t\t", &all, base_all.as_ref(), &stats.opt);
+        write_stats_label(&mut w, "all", &all, base_all.as_ref(), &stats.opt);
     }
     Ok(())
 }
