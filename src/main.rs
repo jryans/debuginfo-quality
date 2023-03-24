@@ -509,7 +509,6 @@ fn ranges_source_lines<R: Reader>(
     let mut source_line_set = BTreeSet::new();
     for range in ranges {
         // println!("Range: [{:#x}, {:#x})", range.begin, range.end);
-        let mut last_line = None;
         loop {
             // Continue until we find a row for beginning of range (may not be exact match)
             if row.address() < range.begin {
@@ -523,16 +522,7 @@ fn ranges_source_lines<R: Reader>(
             }
             // println!("Line: {:#x} -> {:?}", row.address(), row.line());
             if let Some(current_line) = row.line() {
-                if let Some(last_line) = last_line {
-                    // Add all source lines from the last line to the current line
-                    // println!("Marking: [{}, {}]", last_line, current_line);
-                    for l in last_line..=current_line {
-                        source_line_set.insert(l);
-                    }
-                } else {
-                    source_line_set.insert(current_line);
-                }
-                last_line = Some(current_line);
+                source_line_set.insert(current_line);
             }
             row = line_sm.next_row().unwrap()
                          .expect("Next row should exist in line table").1;
