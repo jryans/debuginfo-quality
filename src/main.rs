@@ -87,14 +87,14 @@ struct Opt {
     /// Output using tab-separated values (TSV) format
     #[structopt(long="tsv")]
     tsv: bool,
-    /// File to analyze
-    #[structopt(parse(from_os_str))]
-    file: PathBuf,
     /// File to use as a baseline. We try to match up functions in this file
     /// against functions in the main file; for all matches, subtract the scope coverage
     /// percentage in the baseline from the percentage of the main file.
-    #[structopt(parse(from_os_str))]
+    #[structopt(long="baseline", parse(from_os_str))]
     baseline: Option<PathBuf>,
+    /// File to analyze
+    #[structopt(parse(from_os_str))]
+    file: PathBuf,
 }
 
 fn map(path: &Path) -> memmap2::Mmap {
