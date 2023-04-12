@@ -97,6 +97,13 @@ struct Opt {
     /// to start on the first source line used for that variable in this file.
     #[structopt(long="range-start-baseline")]
     range_start_baseline: bool,
+    /// Extend variable source line range from end of baseline to the end of parent scope. We match
+    /// all variables in this file to the main file. For each variable in the main file, an
+    /// additional coverage source line range is added from the point where baseline coverage ends
+    /// to the end of parent scope. This simulates a debugging workflow that keeps variables live
+    /// until the end of their scope.
+    #[structopt(long="extend-from-baseline")]
+    extend_from_baseline: bool,
     /// File to analyze
     #[structopt(parse(from_os_str))]
     file: PathBuf,
@@ -252,7 +259,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         write!(&mut w, "\t\t\t\t")?;
     }
     write!(&mut w, "Name")?;
-    if base_stats.is_some() && !stats.opt.range_start_baseline {
+    let adjusting_by_baseline = stats.opt.range_start_baseline || stats.opt.extend_from_baseline;
+    if base_stats.is_some() && !adjusting_by_baseline {
         writeln!(&mut w,
                  "\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}\
                   \t{:12}\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}",
@@ -293,34 +301,53 @@ fn main() -> Result<(), Box<dyn Error>> {
                         write!(&mut w, ",{}", &inline)?;
                     }
                     write!(&mut w, ",{:12.12}@0x{:x}:0x{:x}", &v.name, function_stats.unit_offset, v.entry_offset)?;
-                    let (v_stats, bv_stats) = if stats.opt.range_start_baseline {
-                        // Baseline defines the start of coverage in source line terms
+                    let v_stats = if adjusting_by_baseline {
                         let v_stats = if let Some(bv) = base_v {
                             let mut v_stats_adjusted = v.stats.clone();
-                            if let Some(start_line) = bv.source_line_set_covered.first() {
-                                let mut source_line_set = v.source_line_set_covered.clone();
-                                // let mut trimmed = false;
-                                while source_line_set.first().unwrap_or(&u64::MAX) < start_line {
-                                    source_line_set.pop_first();
-                                    // trimmed = true;
+                            let mut source_line_set_adjusted = v.extra.source_line_set_covered.clone();
+                            if stats.opt.range_start_baseline {
+                                // Baseline defines the start of coverage in source line terms
+                                if let Some(start_line) = bv.extra.source_line_set_covered.first() {
+                                    // let mut trimmed = false;
+                                    while source_line_set_adjusted.first().unwrap_or(&u64::MAX) < start_line {
+                                        source_line_set_adjusted.pop_first();
+                                        // trimmed = true;
+                                    }
+                                    // if trimmed {
+                                    //     println!("Start line: {}", start_line);
+                                    //     println!("Base source line set: {:?}", bv.extra.source_line_set_covered);
+                                    //     println!("Main source line set: {:?}", v.extra.source_line_set_covered);
+                                    //     println!("Res  source line set: {:?}", source_line_set_adjusted);
+                                    // }
+                                } else {
+                                    source_line_set_adjusted.clear();
                                 }
-                                // if trimmed {
-                                //     println!("Start line: {}", start_line);
-                                //     println!("Base source line set: {:?}", bv.source_line_set_covered);
-                                //     println!("Main source line set: {:?}", v.source_line_set_covered);
-                                //     println!("Res  source line set: {:?}", source_line_set);
-                                // }
-                                v_stats_adjusted.source_lines_covered = source_line_set.len() as u64
-                            } else {
-                                v_stats_adjusted.source_lines_covered = 0;
                             }
+                            if stats.opt.extend_from_baseline {
+                                // Add additional range from end of baseline to end of scope
+                                if let Some(source_line_set_after_covered) = &bv.extra.source_line_set_after_covered {
+                                    source_line_set_adjusted.append(&mut source_line_set_after_covered.clone());
+                                    // if !source_line_set_after_covered.is_empty() {
+                                    //     println!("After cov. source line set: {:?}", source_line_set_after_covered);
+                                    //     println!("Main       source line set: {:?}", v.extra.source_line_set_covered);
+                                    //     println!("Res        source line set: {:?}", source_line_set_adjusted);
+                                    // }
+                                }
+                            }
+                            v_stats_adjusted.source_lines_covered = source_line_set_adjusted.len() as u64;
                             v_stats_adjusted
                         } else {
                             v.stats
                         };
-                        (v_stats, None)
+                        v_stats
                     } else {
-                        (v.stats, base_v.map(|bv| &bv.stats))
+                        v.stats
+                    };
+                    // Disable display of diff to baseline when using it to adjust main ranges
+                    let bv_stats = if adjusting_by_baseline {
+                        None
+                    } else {
+                        base_v.map(|bv| &bv.stats)
                     };
                     write_stats(&mut w, &v_stats, bv_stats);
                 }
@@ -331,7 +358,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         writeln!(&mut w)?;
     }
-    if stats.opt.range_start_baseline {
+    if adjusting_by_baseline {
         base_stats = None;
     }
     if !stats.opt.only_locals {
@@ -374,8 +401,14 @@ struct NamedVarStats {
     inlines: Vec<String>,
     name: String,
     entry_offset: usize,
-    source_line_set_covered: BTreeSet<u64>,
+    extra: ExtraVarInfo,
     stats: VariableStats,
+}
+
+#[derive(Clone)]
+struct ExtraVarInfo {
+    source_line_set_covered: BTreeSet<u64>,
+    source_line_set_after_covered: Option<BTreeSet<u64>>,
 }
 
 #[derive(Clone)]
@@ -446,7 +479,7 @@ impl<'a> UnitStats<'a> {
                   entry_offset: usize,
                   subprogram_name_stack: &[(MaybeDemangle, isize, bool)],
                   var_name: Option<MaybeDemangle>,
-                  source_line_set_covered: BTreeSet<u64>,
+                  extra_var_info: ExtraVarInfo,
                   stats: VariableStats) {
         if (self.opt.only_parameters && var_type != VarType::Parameter) ||
             (self.opt.only_locals && var_type != VarType::Variable) {
@@ -467,7 +500,7 @@ impl<'a> UnitStats<'a> {
                 inlines: subprogram_name_stack[i..].iter().map(|&(ref name, _, _)| name.demangled().into_owned()).collect(),
                 name: var_name.map(|d| d.demangled()).unwrap_or(Cow::Borrowed("<anon>")).into_owned(),
                 entry_offset,
-                source_line_set_covered,
+                extra: extra_var_info,
                 stats,
             });
         }
@@ -508,6 +541,20 @@ impl VariableStats {
 
 fn ranges_instruction_bytes(r: &[gimli::Range]) -> u64 {
     r.iter().fold(0, |sum, r| { sum + (r.end - r.begin) })
+}
+
+fn ranges_end(r: &[gimli::Range]) -> Option<u64> {
+    r.iter().last().map(|r| r.end)
+}
+
+fn ranges_from_bounds(begin: Option<u64>, end: Option<u64>) -> Vec<gimli::Range> {
+    let mut result = Vec::new();
+    if let (Some(begin), Some(end)) = (begin, end) {
+        if begin < end {
+            result.push(gimli::Range { begin, end })
+        }
+    }
+    result
 }
 
 fn ranges_overlap(rs1: &[gimli::Range], rs2: &[gimli::Range]) -> Vec<gimli::Range> {
@@ -769,17 +816,21 @@ fn evaluate_info<'a>(
             };
             let var_name = lookup_name(&unit, &entry, &abbrevs, debug_str);
             // println!("Variable stats for {}", var_name.as_ref().unwrap().demangled());
-            let source_line_set_covered;
-            let var_stats = if entry.attr_value(gimli::DW_AT_const_value).unwrap().is_some() {
+            let (var_stats, extra_var_info) = if entry.attr_value(gimli::DW_AT_const_value).unwrap().is_some() {
                 let bytes_in_scope = ranges_instruction_bytes(ranges);
                 let (lines_in_scope, source_line_set) = ranges_source_lines(ranges, line_program.clone());
-                source_line_set_covered = source_line_set;
-                VariableStats {
-                    instruction_bytes_in_scope: bytes_in_scope,
-                    instruction_bytes_covered: bytes_in_scope,
-                    source_lines_in_scope: lines_in_scope,
-                    source_lines_covered: lines_in_scope,
-                }
+                (
+                    VariableStats {
+                        instruction_bytes_in_scope: bytes_in_scope,
+                        instruction_bytes_covered: bytes_in_scope,
+                        source_lines_in_scope: lines_in_scope,
+                        source_lines_covered: lines_in_scope,
+                    },
+                    ExtraVarInfo {
+                        source_line_set_covered: source_line_set,
+                        source_line_set_after_covered: None,
+                    },
+                )
             } else {
                 match entry.attr_value(gimli::DW_AT_location).unwrap() {
                     Some(AttributeValue::Exprloc(expr)) => {
@@ -793,13 +844,18 @@ fn evaluate_info<'a>(
                         } else {
                             (bytes_in_scope, lines_in_scope, source_line_set)
                         };
-                        source_line_set_covered = source_line_set;
-                        VariableStats {
-                            instruction_bytes_in_scope: bytes_in_scope,
-                            instruction_bytes_covered: bytes_covered,
-                            source_lines_in_scope: lines_in_scope,
-                            source_lines_covered: lines_covered,
-                        }
+                        (
+                            VariableStats {
+                                instruction_bytes_in_scope: bytes_in_scope,
+                                instruction_bytes_covered: bytes_covered,
+                                source_lines_in_scope: lines_in_scope,
+                                source_lines_covered: lines_covered,
+                            },
+                            ExtraVarInfo {
+                                source_line_set_covered: source_line_set,
+                                source_line_set_after_covered: None,
+                            },
+                        )
                     }
                     Some(AttributeValue::LocationListsRef(loc)) => {
                         let mut locations = {
@@ -816,30 +872,43 @@ fn evaluate_info<'a>(
                             }).collect::<Vec<_>>().expect("invalid location list")
                         };
                         sort_nonoverlapping(&mut locations);
-                        let (source_lines_covered, source_line_set) = ranges_source_lines(&ranges_overlap(ranges, &locations[..]), line_program.clone());
-                        source_line_set_covered = source_line_set;
-                        VariableStats {
-                            instruction_bytes_in_scope: ranges_instruction_bytes(ranges),
-                            instruction_bytes_covered: ranges_instruction_bytes(&ranges_overlap(ranges, &locations[..])),
-                            source_lines_in_scope: ranges_source_lines(ranges, line_program.clone()).0,
-                            source_lines_covered,
-                        }
+                        let covered_ranges = ranges_overlap(ranges, &locations[..]);
+                        let (source_lines_covered, source_line_set_covered) = ranges_source_lines(&covered_ranges, line_program.clone());
+                        let after_covered_ranges = ranges_from_bounds(ranges_end(&covered_ranges), ranges_end(ranges));
+                        let (_, source_line_set_after_covered) = ranges_source_lines(&after_covered_ranges, line_program.clone());
+                        (
+                            VariableStats {
+                                instruction_bytes_in_scope: ranges_instruction_bytes(ranges),
+                                instruction_bytes_covered: ranges_instruction_bytes(&covered_ranges),
+                                source_lines_in_scope: ranges_source_lines(ranges, line_program.clone()).0,
+                                source_lines_covered,
+                            },
+                            ExtraVarInfo {
+                                source_line_set_covered,
+                                source_line_set_after_covered: Some(source_line_set_after_covered),
+                            },
+                        )
                     }
                     None => {
-                        source_line_set_covered = BTreeSet::new();
-                        VariableStats {
-                            instruction_bytes_in_scope: ranges_instruction_bytes(ranges),
-                            instruction_bytes_covered: 0,
-                            source_lines_in_scope: ranges_source_lines(ranges, line_program.clone()).0,
-                            source_lines_covered: 0,
-                        }
+                        (
+                            VariableStats {
+                                instruction_bytes_in_scope: ranges_instruction_bytes(ranges),
+                                instruction_bytes_covered: 0,
+                                source_lines_in_scope: ranges_source_lines(ranges, line_program.clone()).0,
+                                source_lines_covered: 0,
+                            },
+                            ExtraVarInfo {
+                                source_line_set_covered: BTreeSet::new(),
+                                source_line_set_after_covered: None,
+                            },
+                        )
                     }
                     _ => panic!("Unknown DW_AT_location attribute at {}", to_ref_str(&unit, &entry)),
                 }
             };
             unit_stats.accumulate(var_type, entry.offset().0,
                                   &namespace_stack, var_name,
-                                  source_line_set_covered, var_stats);
+                                  extra_var_info, var_stats);
         }
         unit_stats.into()
     };
