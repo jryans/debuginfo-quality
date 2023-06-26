@@ -277,21 +277,30 @@ fn main() -> Result<(), Box<dyn Error>> {
     if stats.opt.functions || stats.opt.variables {
         let mut functions: Vec<(FunctionStats, Option<&FunctionStats>)> = if let Some(base) = base_stats.as_ref() {
             let mut base_functions = HashMap::new();
+            // TODO: Avoid cloning keys here...?
             for f in base.output.iter() {
-                base_functions.insert(&f.name, f);
+                base_functions.insert((f.name.clone(), f.unit_name.clone()), f);
             }
-            stats.output.into_iter().filter_map(|o| base_functions.get(&o.name).map(|b| (o, Some(*b)))).collect()
+            stats.output.into_iter().filter_map(|o|
+                base_functions.get(&(o.name.clone(), o.unit_name.clone())).map(|b| (o, Some(*b)))
+            ).collect()
         } else {
             stats.output.into_iter().map(|o| (o, None)).collect()
         };
         functions.sort_by(|a, b| goodness(a).partial_cmp(&goodness(b)).unwrap());
         for (function_stats, base_function_stats) in functions {
             if stats.opt.variables {
+                let unit_name = function_stats.unit_name.clone();
                 for v in function_stats.variables {
-                    let base_v = base_function_stats.and_then(|f| {
-                        let mut same_name = f.variables.iter().filter(|&bv| bv.name == v.name);
-                        if same_name.clone().count() == 1 {
-                            same_name.next()
+                    let base_v = base_function_stats.and_then(|bf| {
+                        let mut same_v = bf.variables.iter().filter(|&bv|
+                            bv.name == v.name &&
+                            bv.decl_file == v.decl_file &&
+                            bv.decl_line == v.decl_line &&
+                            bf.unit_name == unit_name
+                        );
+                        if same_v.clone().count() == 1 {
+                            same_v.next()
                         } else {
                             None
                         }
@@ -300,7 +309,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     for inline in v.inlines {
                         write!(&mut w, ", {}", &inline)?;
                     }
-                    write!(&mut w, ", {:12.12}, decl {}:{}, unit {}", &v.name, &v.decl_file, &v.decl_line, &v.unit_name)?;
+                    write!(&mut w, ", {:12.12}, decl {}:{}, unit {}", &v.name, &v.decl_file, &v.decl_line, &function_stats.unit_name)?;
                     let v_stats = if adjusting_by_baseline {
                         let v_stats = if let Some(bv) = base_v {
                             let mut v_stats_adjusted = v.stats.clone();
@@ -352,7 +361,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     write_stats(&mut w, &v_stats, bv_stats);
                 }
             } else {
-                write!(&mut w, "{:12.12}@0x{:x}:0x{:x}", &function_stats.name, function_stats.unit_offset, function_stats.entry_offset)?;
+                write!(&mut w, "{:12.12}, unit {}", &function_stats.name, &function_stats.unit_name)?;
                 write_stats(&mut w, &function_stats.stats, base_function_stats.map(|b| &b.stats));
             }
         }
@@ -402,7 +411,6 @@ struct NamedVarStats {
     name: String,
     decl_file: String,
     decl_line: String,
-    unit_name: String,
     extra: ExtraVarInfo,
     stats: VariableStats,
 }
@@ -416,8 +424,7 @@ struct ExtraVarInfo {
 #[derive(Clone)]
 struct FunctionStats {
     name: String,
-    unit_offset: usize,
-    entry_offset: usize,
+    unit_name: String,
     stats: VariableStats,
     variables: Vec<NamedVarStats>,
 }
@@ -459,13 +466,12 @@ impl Stats {
 }
 
 impl<'a> UnitStats<'a> {
-    fn enter_noninline_function(&mut self, name: &MaybeDemangle<'a>, unit_offset: usize, entry_offset: usize) {
+    fn enter_noninline_function(&mut self, name: &MaybeDemangle<'a>, unit_name: &str) {
         let demangled = name.demangled();
         self.noninline_function_stack.push(if self.opt.select_functions.as_ref().map(|r| r.is_match(&demangled)).unwrap_or(true) {
             Some(FunctionStats {
                 name: demangled.into_owned(),
-                unit_offset: unit_offset,
-                entry_offset: entry_offset,
+                unit_name: unit_name.into(),
                 stats: VariableStats::default(),
                 variables: Vec::new(),
             })
@@ -482,7 +488,6 @@ impl<'a> UnitStats<'a> {
                   var_name: Option<MaybeDemangle>,
                   var_decl_file: &str,
                   var_decl_line: &str,
-                  unit_name: &str,
                   extra_var_info: ExtraVarInfo,
                   stats: VariableStats) {
         if (self.opt.only_parameters && var_type != VarType::Parameter) ||
@@ -505,7 +510,6 @@ impl<'a> UnitStats<'a> {
                 name: var_name.map(|d| d.demangled()).unwrap_or(Cow::Borrowed("<anon>")).into_owned(),
                 decl_file: var_decl_file.into(),
                 decl_line: var_decl_line.into(),
-                unit_name: unit_name.into(),
                 extra: extra_var_info,
                 stats,
             });
@@ -759,6 +763,7 @@ fn evaluate_info<'a>(
                 unit_name = name.string_value(debug_str);
             }
         }
+        let unit_name_for_output = unit_name.map_or(Cow::Borrowed("<unknown unit>"), |n| n.to_string_lossy());
         let line_program = line_program_offset.map(|offset| {
             debug_line.program(offset, unit.address_size(), unit_dir, unit_name).unwrap()
         }).expect("Debug info should have source line table");
@@ -795,7 +800,7 @@ fn evaluate_info<'a>(
                 gimli::DW_TAG_variable => VarType::Variable,
                 gimli::DW_TAG_subprogram => {
                     if let Some(name) = lookup_name(&unit, &entry, &abbrevs, debug_str) {
-                        unit_stats.enter_noninline_function(&name, unit.offset().0, entry.offset().0);
+                        unit_stats.enter_noninline_function(&name, &unit_name_for_output);
                         namespace_stack.push((name, depth, false));
                     }
                     continue;
@@ -927,9 +932,8 @@ fn evaluate_info<'a>(
                     _ => panic!("Unknown DW_AT_location attribute at {}", to_ref_str(&unit, &entry)),
                 }
             };
-            let unit_name_for_output = unit_name.map_or(Cow::Borrowed("<unknown unit>"), |n| n.to_string_lossy());
             unit_stats.accumulate(var_type, &namespace_stack,
-                                  var_name, &var_decl_file, &var_decl_line, &unit_name_for_output,
+                                  var_name, &var_decl_file, &var_decl_line,
                                   extra_var_info, var_stats);
         }
         unit_stats.into()
