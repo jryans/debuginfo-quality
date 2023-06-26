@@ -298,9 +298,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                     });
                     write!(&mut w, "{:12.12}", &function_stats.name)?;
                     for inline in v.inlines {
-                        write!(&mut w, ",{}", &inline)?;
+                        write!(&mut w, ", {}", &inline)?;
                     }
-                    write!(&mut w, ",{:12.12},{}:{}", &v.name, &v.decl_file, &v.decl_line)?;
+                    write!(&mut w, ", {:12.12}, decl {}:{}, unit {}", &v.name, &v.decl_file, &v.decl_line, &v.unit_name)?;
                     let v_stats = if adjusting_by_baseline {
                         let v_stats = if let Some(bv) = base_v {
                             let mut v_stats_adjusted = v.stats.clone();
@@ -402,6 +402,7 @@ struct NamedVarStats {
     name: String,
     decl_file: String,
     decl_line: String,
+    unit_name: String,
     extra: ExtraVarInfo,
     stats: VariableStats,
 }
@@ -481,6 +482,7 @@ impl<'a> UnitStats<'a> {
                   var_name: Option<MaybeDemangle>,
                   var_decl_file: &str,
                   var_decl_line: &str,
+                  unit_name: &str,
                   extra_var_info: ExtraVarInfo,
                   stats: VariableStats) {
         if (self.opt.only_parameters && var_type != VarType::Parameter) ||
@@ -503,6 +505,7 @@ impl<'a> UnitStats<'a> {
                 name: var_name.map(|d| d.demangled()).unwrap_or(Cow::Borrowed("<anon>")).into_owned(),
                 decl_file: var_decl_file.into(),
                 decl_line: var_decl_line.into(),
+                unit_name: unit_name.into(),
                 extra: extra_var_info,
                 stats,
             });
@@ -724,8 +727,8 @@ fn evaluate_info<'a>(
         let mut entries = unit.entries(&abbrevs);
         let mut base_address = None;
         let mut line_program_offset = None;
-        let mut comp_dir = None;
-        let mut comp_name = None;
+        let mut unit_dir = None;
+        let mut unit_name = None;
         {
             let (delta, entry) = entries.next_dfs().unwrap().unwrap();
             assert_eq!(delta, 0);
@@ -750,14 +753,14 @@ fn evaluate_info<'a>(
                 line_program_offset = Some(offset);
             }
             if let Some(dir) = entry.attr(gimli::DW_AT_comp_dir).unwrap() {
-                comp_dir = dir.string_value(debug_str);
+                unit_dir = dir.string_value(debug_str);
             }
             if let Some(name) = entry.attr(gimli::DW_AT_name).unwrap() {
-                comp_name = name.string_value(debug_str);
+                unit_name = name.string_value(debug_str);
             }
         }
         let line_program = line_program_offset.map(|offset| {
-            debug_line.program(offset, unit.address_size(), comp_dir, comp_name).unwrap()
+            debug_line.program(offset, unit.address_size(), unit_dir, unit_name).unwrap()
         }).expect("Debug info should have source line table");
         let mut depth = 0;
         let mut scopes: Vec<(Vec<gimli::Range>, isize)> = Vec::new();
@@ -924,8 +927,9 @@ fn evaluate_info<'a>(
                     _ => panic!("Unknown DW_AT_location attribute at {}", to_ref_str(&unit, &entry)),
                 }
             };
+            let unit_name_for_output = unit_name.map_or(Cow::Borrowed("<unknown unit>"), |n| n.to_string_lossy());
             unit_stats.accumulate(var_type, &namespace_stack,
-                                  var_name, &var_decl_file, &var_decl_line,
+                                  var_name, &var_decl_file, &var_decl_line, &unit_name_for_output,
                                   extra_var_info, var_stats);
         }
         unit_stats.into()
