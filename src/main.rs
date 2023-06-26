@@ -300,7 +300,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     for inline in v.inlines {
                         write!(&mut w, ",{}", &inline)?;
                     }
-                    write!(&mut w, ",{:12.12}@0x{:x}:0x{:x}", &v.name, function_stats.unit_offset, v.entry_offset)?;
+                    write!(&mut w, ",{:12.12},{}:{}", &v.name, &v.decl_file, &v.decl_line)?;
                     let v_stats = if adjusting_by_baseline {
                         let v_stats = if let Some(bv) = base_v {
                             let mut v_stats_adjusted = v.stats.clone();
@@ -400,7 +400,8 @@ struct Stats {
 struct NamedVarStats {
     inlines: Vec<String>,
     name: String,
-    entry_offset: usize,
+    decl_file: String,
+    decl_line: String,
     extra: ExtraVarInfo,
     stats: VariableStats,
 }
@@ -476,9 +477,10 @@ impl<'a> UnitStats<'a> {
     }
     fn accumulate(&mut self,
                   var_type: VarType,
-                  entry_offset: usize,
                   subprogram_name_stack: &[(MaybeDemangle, isize, bool)],
                   var_name: Option<MaybeDemangle>,
+                  var_decl_file: &str,
+                  var_decl_line: &str,
                   extra_var_info: ExtraVarInfo,
                   stats: VariableStats) {
         if (self.opt.only_parameters && var_type != VarType::Parameter) ||
@@ -499,7 +501,8 @@ impl<'a> UnitStats<'a> {
             function_stats.variables.push(NamedVarStats {
                 inlines: subprogram_name_stack[i..].iter().map(|&(ref name, _, _)| name.demangled().into_owned()).collect(),
                 name: var_name.map(|d| d.demangled()).unwrap_or(Cow::Borrowed("<anon>")).into_owned(),
-                entry_offset,
+                decl_file: var_decl_file.into(),
+                decl_line: var_decl_line.into(),
                 extra: extra_var_info,
                 stats,
             });
@@ -815,6 +818,21 @@ fn evaluate_info<'a>(
                 continue;
             };
             let var_name = lookup_name(&unit, &entry, &abbrevs, debug_str);
+            let var_decl_file = match entry.attr_value(gimli::DW_AT_decl_file).unwrap() {
+                Some(gimli::AttributeValue::FileIndex(file)) => line_program
+                    .header()
+                    .file(file)
+                    .unwrap()
+                    .path_name()
+                    .to_string_lossy(),
+                Some(_) => panic!("Invalid DW_AT_decl_file"),
+                None => Cow::Borrowed("<unknown file>"),
+            };
+            let var_decl_line = match entry.attr_value(gimli::DW_AT_decl_line).unwrap() {
+                Some(gimli::AttributeValue::Udata(line)) => line.to_string(),
+                Some(_) => panic!("Invalid DW_AT_decl_line"),
+                None => String::from("<unknown line>"),
+            };
             // println!("Variable stats for {}", var_name.as_ref().unwrap().demangled());
             let (var_stats, extra_var_info) = if entry.attr_value(gimli::DW_AT_const_value).unwrap().is_some() {
                 let bytes_in_scope = ranges_instruction_bytes(ranges);
@@ -906,8 +924,8 @@ fn evaluate_info<'a>(
                     _ => panic!("Unknown DW_AT_location attribute at {}", to_ref_str(&unit, &entry)),
                 }
             };
-            unit_stats.accumulate(var_type, entry.offset().0,
-                                  &namespace_stack, var_name,
+            unit_stats.accumulate(var_type, &namespace_stack,
+                                  var_name, &var_decl_file, &var_decl_line,
                                   extra_var_info, var_stats);
         }
         unit_stats.into()
