@@ -305,11 +305,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                             None
                         }
                     });
-                    write!(&mut w, "{:12.12}", &function_stats.name)?;
+                    write!(&mut w, "{}", &function_stats.name)?;
                     for inline in v.inlines {
                         write!(&mut w, ", {}", &inline)?;
                     }
-                    write!(&mut w, ", {:12.12}, decl {}:{}, unit {}", &v.name, &v.decl_file, &v.decl_line, &function_stats.unit_name)?;
+                    write!(&mut w, ", {}, decl {}:{}, unit {}", &v.name, &v.decl_file, &v.decl_line, &function_stats.unit_name)?;
                     let v_stats = if adjusting_by_baseline {
                         let v_stats = if let Some(bv) = base_v {
                             let mut v_stats_adjusted = v.stats.clone();
@@ -361,7 +361,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     write_stats(&mut w, &v_stats, bv_stats);
                 }
             } else {
-                write!(&mut w, "{:12.12}, unit {}", &function_stats.name, &function_stats.unit_name)?;
+                write!(&mut w, "{}, unit {}", &function_stats.name, &function_stats.unit_name)?;
                 write_stats(&mut w, &function_stats.stats, base_function_stats.map(|b| &b.stats));
             }
         }
