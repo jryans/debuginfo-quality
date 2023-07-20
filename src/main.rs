@@ -603,6 +603,7 @@ fn ranges_source_lines<R: Reader>(
     let mut line_sm = line_program.rows();
     let mut row = line_sm.next_row().unwrap()
                          .expect("Next row should exist in line table").1;
+    let mut previous_row_line = None;
     // Instructions may mark out non-contiguous, overlapping source line ranges.
     // A source line set allows accurate counting even with overlaps.
     let mut source_line_set = BTreeSet::new();
@@ -611,17 +612,27 @@ fn ranges_source_lines<R: Reader>(
         loop {
             // Continue until we find a row for beginning of range (may not be exact match)
             if row.address() < range.begin {
+                previous_row_line = row.line();
                 row = line_sm.next_row().unwrap()
                              .expect("Next row should exist in line table").1;
                 continue;
+            }
+            // If the start of the instruction range is between two line table rows,
+            // include the line from the previous row as well.
+            if let Some(line) = previous_row_line {
+                if row.address() > range.begin {
+                    // println!("Line: {:#x} -> {:?}", range.begin, Some(line));
+                    source_line_set.insert(line);
+                }
+                previous_row_line = None;
             }
             // The end of an instruction range is exclusive, stop when reached
             if row.address() >= range.end {
                 break;
             }
             // println!("Line: {:#x} -> {:?}", row.address(), row.line());
-            if let Some(current_line) = row.line() {
-                source_line_set.insert(current_line);
+            if let Some(line) = row.line() {
+                source_line_set.insert(line);
             }
             row = line_sm.next_row().unwrap()
                          .expect("Next row should exist in line table").1;
