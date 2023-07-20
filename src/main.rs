@@ -323,6 +323,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                                         // trimmed = true;
                                     }
                                     // if trimmed {
+                                    //     print!("{}", &function_stats.name);
+                                    //     println!(", {}, decl {}:{}, unit {}", &v.name, &v.decl_file, &v.decl_line, &function_stats.unit_name);
                                     //     println!("Start line: {}", start_line);
                                     //     println!("Base source line set: {:?}", bv.extra.source_line_set_covered);
                                     //     println!("Main source line set: {:?}", v.extra.source_line_set_covered);
