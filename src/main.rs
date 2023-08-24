@@ -141,30 +141,22 @@ fn open<'a>(path: &Path, mmap: &'a memmap2::Mmap) -> object::File<'a> {
 fn write_stats<W: io::Write>(mut w: W, stats: &VariableStats, base_stats: Option<&VariableStats>) {
     if let Some(b) = base_stats {
         writeln!(w,
-                 "\t{:12}\t{:12}\t{:12.5}\t{:12}\t{:12}\t{:12.5}\t{:12.5}\
-                  \t{:12}\t{:12}\t{:12.5}\t{:12}\t{:12}\t{:12.5}\t{:12.5}",
+                 "\t{:12}\t{:12}\t{:12}\t{:12}\
+                  \t{:12}\t{:12}\t{:12}\t{:12}",
                  stats.instruction_bytes_covered,
                  stats.instruction_bytes_in_scope,
-                 stats.fraction_bytes_covered(),
                  b.instruction_bytes_covered,
                  b.instruction_bytes_in_scope,
-                 b.fraction_bytes_covered(),
-                 stats.fraction_bytes_covered() - b.fraction_bytes_covered(),
                  stats.source_lines_covered,
                  stats.source_lines_in_scope,
-                 stats.fraction_source_lines_covered(),
                  b.source_lines_covered,
-                 b.source_lines_in_scope,
-                 b.fraction_source_lines_covered(),
-                 stats.fraction_source_lines_covered() - b.fraction_source_lines_covered()).unwrap();
+                 b.source_lines_in_scope).unwrap();
     } else {
-        writeln!(w, "\t{:12}\t{:12}\t{:12.5}\t{:12}\t{:12}\t{:12.5}",
+        writeln!(w, "\t{:12}\t{:12}\t{:12}\t{:12}",
                  stats.instruction_bytes_covered,
                  stats.instruction_bytes_in_scope,
-                 stats.fraction_bytes_covered(),
                  stats.source_lines_covered,
-                 stats.source_lines_in_scope,
-                 stats.fraction_source_lines_covered()).unwrap();
+                 stats.source_lines_in_scope).unwrap();
     }
 }
 
@@ -262,16 +254,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     let adjusting_by_baseline = stats.opt.range_start_baseline || stats.opt.extend_from_baseline;
     if base_stats.is_some() && !adjusting_by_baseline {
         writeln!(&mut w,
-                 "\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}\
-                  \t{:12}\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}",
-                 "Cov (B)", "Scope (B)", "CB / SB",
-                 "BaseCov (B)", "BaseScope (B)", "BCB / BSB", "Diff (B)",
-                 "Cov (L)", "Scope (L)", "CL / SL",
-                 "BaseCov (L)", "BaseScope (L)", "BCL / BSL", "Diff (L)")?;
+                 "\t{:12}\t{:12}\t{:12}\t{:12}\
+                  \t{:12}\t{:12}\t{:12}\t{:12}",
+                 "Cov (B)", "Scope (B)", "BaseCov (B)", "BaseScope (B)",
+                 "Cov (L)", "Scope (L)", "BaseCov (L)", "BaseScope (L)")?;
     } else {
-        writeln!(&mut w, "\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}",
-                 "Cov (B)", "Scope (B)", "CB / SB",
-                 "Cov (L)", "Scope (L)", "CL / SL")?;
+        writeln!(&mut w, "\t{:12}\t{:12}\t{:12}\t{:12}",
+                 "Cov (B)", "Scope (B)",
+                 "Cov (L)", "Scope (L)")?;
     }
     writeln!(&mut w)?;
     if stats.opt.functions || stats.opt.variables {
@@ -544,10 +534,6 @@ struct VariableStats {
 impl VariableStats {
     fn fraction_bytes_covered(&self) -> f64 {
         (self.instruction_bytes_covered as f64)/(self.instruction_bytes_in_scope as f64)
-    }
-
-    fn fraction_source_lines_covered(&self) -> f64 {
-        (self.source_lines_covered as f64)/(self.source_lines_in_scope as f64)
     }
 }
 
