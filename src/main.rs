@@ -138,7 +138,12 @@ fn open<'a>(path: &Path, mmap: &'a memmap2::Mmap) -> object::File<'a> {
     file
 }
 
-fn write_stats<W: io::Write>(mut w: W, stats: &VariableStats, base_stats: Option<&VariableStats>) {
+fn write_stats<W: io::Write>(
+    mut w: W,
+    stats: &VariableStats,
+    base_stats: Option<&VariableStats>,
+    adj_stats: Option<&VariableStatsAdjustment>,
+) {
     if let Some(b) = base_stats {
         writeln!(w,
                  "\t{:12}\t{:12}\t{:12}\t{:12}\
@@ -151,6 +156,13 @@ fn write_stats<W: io::Write>(mut w: W, stats: &VariableStats, base_stats: Option
                  stats.source_lines_in_scope,
                  b.source_lines_covered,
                  b.source_lines_in_scope).unwrap();
+    } else if let Some(adj) = adj_stats {
+        writeln!(w, "\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}",
+                 stats.instruction_bytes_covered,
+                 stats.instruction_bytes_in_scope,
+                 stats.source_lines_covered,
+                 adj.source_lines_covered_adjusted,
+                 stats.source_lines_in_scope).unwrap();
     } else {
         writeln!(w, "\t{:12}\t{:12}\t{:12}\t{:12}",
                  stats.instruction_bytes_covered,
@@ -165,7 +177,7 @@ fn write_stats_label<W: io::Write>(mut w: W, label: &str, stats: &VariableStats,
     if !opt.tsv && (opt.functions || opt.variables) {
         write!(&mut w, "\t\t\t\t").unwrap();
     }
-    write_stats(w, stats, base_stats);
+    write_stats(w, stats, base_stats, None);
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -258,6 +270,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                   \t{:12}\t{:12}\t{:12}\t{:12}",
                  "Cov (B)", "Scope (B)", "BaseCov (B)", "BaseScope (B)",
                  "Cov (L)", "Scope (L)", "BaseCov (L)", "BaseScope (L)")?;
+    } else if adjusting_by_baseline {
+        writeln!(&mut w, "\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}",
+                 "Cov (B)", "Scope (B)",
+                 "Raw Cov (L)", "Adj Cov (L)", "Scope (L)")?;
     } else {
         writeln!(&mut w, "\t{:12}\t{:12}\t{:12}\t{:12}",
                  "Cov (B)", "Scope (B)",
@@ -300,9 +316,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                         write!(&mut w, ", {}", &inline)?;
                     }
                     write!(&mut w, ", {}, decl {}:{}, unit {}", &v.name, &v.decl_file, &v.decl_line, &function_stats.unit_name)?;
-                    let v_stats = if adjusting_by_baseline {
-                        let v_stats = if let Some(bv) = base_v {
-                            let mut v_stats_adjusted = v.stats.clone();
+                    let mut v_stats_adjustment = None;
+                    if adjusting_by_baseline {
+                        if let Some(bv) = base_v {
                             let mut source_line_set_adjusted = v.extra.source_line_set_covered.clone();
                             if stats.opt.range_start_baseline {
                                 // Baseline defines the start of coverage in source line terms
@@ -335,26 +351,22 @@ fn main() -> Result<(), Box<dyn Error>> {
                                     // }
                                 }
                             }
-                            v_stats_adjusted.source_lines_covered = source_line_set_adjusted.len() as u64;
-                            v_stats_adjusted
-                        } else {
-                            v.stats
-                        };
-                        v_stats
-                    } else {
-                        v.stats
-                    };
+                            v_stats_adjustment = Some(VariableStatsAdjustment {
+                                source_lines_covered_adjusted: source_line_set_adjusted.len() as u64,
+                            });
+                        }
+                    }
                     // Disable display of diff to baseline when using it to adjust main ranges
                     let bv_stats = if adjusting_by_baseline {
                         None
                     } else {
                         base_v.map(|bv| &bv.stats)
                     };
-                    write_stats(&mut w, &v_stats, bv_stats);
+                    write_stats(&mut w, &v.stats, bv_stats, v_stats_adjustment.as_ref());
                 }
             } else {
                 write!(&mut w, "{}, unit {}", &function_stats.name, &function_stats.unit_name)?;
-                write_stats(&mut w, &function_stats.stats, base_function_stats.map(|b| &b.stats));
+                write_stats(&mut w, &function_stats.stats, base_function_stats.map(|b| &b.stats), None);
             }
         }
         writeln!(&mut w)?;
@@ -541,6 +553,10 @@ impl VariableStats {
     fn fraction_bytes_covered(&self) -> f64 {
         (self.instruction_bytes_covered as f64)/(self.instruction_bytes_in_scope as f64)
     }
+}
+
+struct VariableStatsAdjustment {
+    source_lines_covered_adjusted: u64,
 }
 
 fn ranges_instruction_bytes(r: &[gimli::Range]) -> u64 {
