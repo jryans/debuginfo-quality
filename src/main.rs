@@ -362,16 +362,22 @@ fn main() -> Result<(), Box<dyn Error>> {
     if adjusting_by_baseline {
         base_stats = None;
     }
-    if !stats.opt.only_locals {
-        write_stats_label(&mut w, "params", &stats.bundle.parameters, base_stats.as_ref().map(|b| &b.bundle.parameters), &stats.opt);
-    }
-    if !stats.opt.only_parameters {
-        write_stats_label(&mut w, "vars", &stats.bundle.variables, base_stats.as_ref().map(|b| &b.bundle.variables), &stats.opt);
-    }
-    if !stats.opt.only_locals && !stats.opt.only_parameters {
-        let all = stats.bundle.variables + stats.bundle.parameters;
-        let base_all = base_stats.as_ref().map(|b| b.bundle.variables.clone() + b.bundle.parameters.clone());
-        write_stats_label(&mut w, "all", &all, base_all.as_ref(), &stats.opt);
+    // When adjusting by baseline, we currently don't recompute accumulated stats, so disable them
+    // to avoid misleading the user.
+    // In TSV mode, we assume some further tooling will analyse the data, so we also disable
+    // accumulated output.
+    if !adjusting_by_baseline && !stats.opt.tsv {
+        if !stats.opt.only_locals {
+            write_stats_label(&mut w, "params", &stats.bundle.parameters, base_stats.as_ref().map(|b| &b.bundle.parameters), &stats.opt);
+        }
+        if !stats.opt.only_parameters {
+            write_stats_label(&mut w, "vars", &stats.bundle.variables, base_stats.as_ref().map(|b| &b.bundle.variables), &stats.opt);
+        }
+        if !stats.opt.only_locals && !stats.opt.only_parameters {
+            let all = stats.bundle.variables + stats.bundle.parameters;
+            let base_all = base_stats.as_ref().map(|b| b.bundle.variables.clone() + b.bundle.parameters.clone());
+            write_stats_label(&mut w, "all", &all, base_all.as_ref(), &stats.opt);
+        }
     }
     Ok(())
 }
