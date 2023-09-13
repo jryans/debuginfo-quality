@@ -41,7 +41,7 @@ arg_enum! {
     }
 }
 
-#[derive(StructOpt, Clone)]
+#[derive(StructOpt, Clone, Default)]
 /// Evaluate the quality of debuginfo
 #[structopt(name = "debuginfo-quality")]
 pub struct Opt {
@@ -117,6 +117,7 @@ pub struct Stats {
 pub struct NamedVarStats {
     pub inlines: Vec<String>,
     pub name: String,
+    pub decl_dir: String,
     pub decl_file: String,
     pub decl_line: String,
     pub extra: ExtraVarInfo,
@@ -194,6 +195,7 @@ impl<'a> UnitStats<'a> {
                   var_type: VarType,
                   subprogram_name_stack: &[(MaybeDemangle, isize, bool)],
                   var_name: Option<MaybeDemangle>,
+                  var_decl_dir: &str,
                   var_decl_file: &str,
                   var_decl_line: &str,
                   extra_var_info: ExtraVarInfo,
@@ -216,6 +218,7 @@ impl<'a> UnitStats<'a> {
             function_stats.variables.push(NamedVarStats {
                 inlines: subprogram_name_stack[i..].iter().map(|&(ref name, _, _)| name.demangled().into_owned()).collect(),
                 name: var_name.map(|d| d.demangled()).unwrap_or(Cow::Borrowed("<anon>")).into_owned(),
+                decl_dir: var_decl_dir.into(),
                 decl_file: var_decl_file.into(),
                 decl_line: var_decl_line.into(),
                 extra: extra_var_info,
@@ -545,6 +548,17 @@ pub fn evaluate_info<'a>(
                 continue;
             };
             let var_name = lookup_name(&unit, &entry, &abbrevs, debug_str);
+            let var_decl_dir = match entry.attr_value(gimli::DW_AT_decl_file).unwrap() {
+                Some(gimli::AttributeValue::FileIndex(file)) => line_program
+                    .header()
+                    .file(file)
+                    .unwrap()
+                    .directory(line_program.header())
+                    .unwrap()
+                    .to_string_lossy(),
+                Some(_) => panic!("Invalid DW_AT_decl_file"),
+                None => Cow::Borrowed("<unknown directory>"),
+            };
             let var_decl_file = match entry.attr_value(gimli::DW_AT_decl_file).unwrap() {
                 Some(gimli::AttributeValue::FileIndex(file)) => line_program
                     .header()
@@ -652,7 +666,7 @@ pub fn evaluate_info<'a>(
                 }
             };
             unit_stats.accumulate(var_type, &namespace_stack,
-                                  var_name, &var_decl_file, &var_decl_line,
+                                  var_name, &var_decl_dir, &var_decl_file, &var_decl_line,
                                   extra_var_info, var_stats);
         }
         unit_stats.into()
