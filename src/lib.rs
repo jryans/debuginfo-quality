@@ -95,6 +95,12 @@ pub struct Opt {
     /// until the end of their scope.
     #[structopt(long="extend-from-baseline")]
     pub extend_from_baseline: bool,
+    /// File describing source line regions used to filter the covered lines in some way.
+    #[structopt(long="regions", parse(from_os_str))]
+    pub regions: Option<PathBuf>,
+    /// Filters covered lines to only those within a computation region.
+    #[structopt(long="only-computation-regions")]
+    pub only_computation_regions: bool,
     /// File to analyze
     #[structopt(parse(from_os_str))]
     pub file: PathBuf,
@@ -254,10 +260,6 @@ impl VariableStats {
     pub fn fraction_bytes_covered(&self) -> f64 {
         (self.instruction_bytes_covered as f64)/(self.instruction_bytes_in_scope as f64)
     }
-}
-
-pub struct VariableStatsAdjustment {
-    pub source_lines_covered_adjusted: u64,
 }
 
 fn ranges_instruction_bytes(r: &[gimli::Range]) -> u64 {

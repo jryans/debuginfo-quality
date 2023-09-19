@@ -3,10 +3,10 @@ extern crate structopt;
 extern crate typed_arena;
 
 use std::borrow::{Borrow, Cow};
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeSet};
 use std::error::Error;
 use std::fs;
-use std::io::{self, BufWriter, Write};
+use std::io::{self, BufWriter, Write, BufRead};
 use std::iter::Iterator;
 use std::path::Path;
 use std::process;
@@ -49,8 +49,10 @@ fn write_stats<W: io::Write>(
     mut w: W,
     stats: &VariableStats,
     base_stats: Option<&VariableStats>,
-    adj_stats: Option<&VariableStatsAdjustment>,
+    adj_lines: Option<u64>,
+    flt_lines: Option<u64>,
 ) {
+    assert!(base_stats.is_none() || adj_lines.is_none());
     if let Some(b) = base_stats {
         writeln!(w,
                  "\t{:12}\t{:12}\t{:12}\t{:12}\
@@ -63,28 +65,118 @@ fn write_stats<W: io::Write>(
                  stats.source_lines_in_scope,
                  b.source_lines_covered,
                  b.source_lines_in_scope).unwrap();
-    } else if let Some(adj) = adj_stats {
-        writeln!(w, "\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}",
-                 stats.instruction_bytes_covered,
-                 stats.instruction_bytes_in_scope,
-                 stats.source_lines_covered,
-                 adj.source_lines_covered_adjusted,
-                 stats.source_lines_in_scope).unwrap();
     } else {
-        writeln!(w, "\t{:12}\t{:12}\t{:12}\t{:12}",
-                 stats.instruction_bytes_covered,
-                 stats.instruction_bytes_in_scope,
-                 stats.source_lines_covered,
-                 stats.source_lines_in_scope).unwrap();
+        write!(w, "\t{:12}\t{:12}\t{:12}\t{:12}",
+               stats.instruction_bytes_covered,
+               stats.instruction_bytes_in_scope,
+               stats.source_lines_covered,
+               stats.source_lines_in_scope).unwrap();
+        if let Some(adj_lines) = adj_lines {
+            write!(w, "\t{:12}", adj_lines).unwrap();
+        }
+        if let Some(flt_lines) = flt_lines {
+            write!(w, "\t{:12}", flt_lines).unwrap();
+        }
+        writeln!(w).unwrap();
     }
 }
 
-fn write_stats_label<W: io::Write>(mut w: W, label: &str, stats: &VariableStats, base_stats: Option<&VariableStats>, opt: &Opt) {
+fn write_stats_label<W: io::Write>(
+    mut w: W,
+    label: &str,
+    stats: &VariableStats,
+    base_stats: Option<&VariableStats>,
+    opt: &Opt,
+) {
     write!(w, "{}", label).unwrap();
     if !opt.tsv && (opt.functions || opt.variables) {
         write!(&mut w, "\t\t\t\t").unwrap();
     }
-    write_stats(w, stats, base_stats, None);
+    write_stats(w, stats, base_stats, None, None);
+}
+
+// TODO: Use references instead of copying
+#[derive(Debug)]
+struct RegionLocation {
+    file: String,
+    line: u64,
+}
+
+impl RegionLocation {
+    fn parse(location: &str) -> Result<Self, Box<dyn Error>> {
+        let mut parts = location.split(':');
+        let file = parts.next().unwrap().to_string();
+        let line = parts.next().unwrap().parse()?;
+        Ok(Self {
+            file,
+            line,
+        })
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum RegionKind {
+    Unsupported,
+    Computation,
+}
+
+#[derive(Debug)]
+struct Region {
+    start: RegionLocation,
+    end: RegionLocation,
+    kind: RegionKind,
+}
+
+impl Region {
+    fn parse(line: &str) -> Result<Self, Box<dyn Error>> {
+        let mut parts = line.split('\t');
+        let start = RegionLocation::parse(parts.next().unwrap())?;
+        let end = RegionLocation::parse(parts.next().unwrap())?;
+        let kind = match parts.next().unwrap() {
+            "Computation" => RegionKind::Computation,
+            _ => RegionKind::Unsupported,
+        };
+        Ok(Self {
+            start,
+            end,
+            kind,
+        })
+    }
+}
+
+fn parse_regions(bytes: &[u8]) -> Result<Vec<Region>, Box<dyn Error>> {
+    let mut regions = Vec::new();
+
+    for regions_line in bytes.lines() {
+        // Line format:
+        // start as `file:line:column`\t
+        // end as `file:line:column`\t
+        // kind (e.g. `Computation`)\t
+        // expression type
+        let regions_line = regions_line.unwrap();
+        let region = Region::parse(&regions_line)?;
+        regions.push(region);
+    }
+
+    Ok(regions)
+}
+
+fn computation_line_sets_by_file(regions: &Vec<Region>) -> HashMap<String, BTreeSet<u64>> {
+    let mut line_sets_by_file = HashMap::new();
+
+    for region in regions {
+        if region.kind != RegionKind::Computation {
+            continue;
+        }
+
+        let file = region.start.file.clone();
+        let line_set: &mut BTreeSet<u64> = line_sets_by_file.entry(file).or_default();
+        for line in region.start.line..=region.end.line {
+            line_set.insert(line);
+        }
+    }
+
+    line_sets_by_file
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -162,6 +254,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         base_stats = Some(stats);
     }
 
+    let regions_map = opt.regions.as_ref().map(|path| map(path));
+    let regions = regions_map.map(|r| parse_regions(&r));
+    let computation_line_sets_by_file = regions.map(|r| computation_line_sets_by_file(&r.unwrap()));
+
     let stdout = io::stdout();
     let mut stdout_locked = stdout.lock();
     let mut w = BufWriter::new(&mut stdout_locked);
@@ -171,22 +267,27 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     write!(&mut w, "Name")?;
     let adjusting_by_baseline = stats.opt.range_start_baseline || stats.opt.extend_from_baseline;
+    let filtering_by_regions = stats.opt.only_computation_regions;
     if base_stats.is_some() && !adjusting_by_baseline {
         writeln!(&mut w,
                  "\t{:12}\t{:12}\t{:12}\t{:12}\
                   \t{:12}\t{:12}\t{:12}\t{:12}",
                  "Cov (B)", "Scope (B)", "BaseCov (B)", "BaseScope (B)",
                  "Cov (L)", "Scope (L)", "BaseCov (L)", "BaseScope (L)")?;
-    } else if adjusting_by_baseline {
-        writeln!(&mut w, "\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}",
-                 "Cov (B)", "Scope (B)",
-                 "Raw Cov (L)", "Adj Cov (L)", "Scope (L)")?;
     } else {
-        writeln!(&mut w, "\t{:12}\t{:12}\t{:12}\t{:12}",
-                 "Cov (B)", "Scope (B)",
-                 "Cov (L)", "Scope (L)")?;
+        write!(&mut w, "\t{:12}\t{:12}\t{:12}\t{:12}",
+               "Cov (B)", "Scope (B)",
+               "Cov (L)", "Scope (L)")?;
+        if adjusting_by_baseline {
+            write!(&mut w, "\t{:12}", "Adj Cov (L)")?;
+        }
+        if filtering_by_regions {
+            write!(&mut w, "\t{:12}", "Flt Cov (L)")?;
+        }
+        writeln!(&mut w)?;
     }
     writeln!(&mut w)?;
+
     if stats.opt.functions || stats.opt.variables {
         let mut functions: Vec<(FunctionStats, Option<&FunctionStats>)> = if let Some(base) = base_stats.as_ref() {
             let mut base_functions = HashMap::new();
@@ -218,11 +319,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                             None
                         }
                     });
+
                     write!(&mut w, "{}", &function_stats.name)?;
                     for inline in v.inlines {
                         write!(&mut w, ", {}", &inline)?;
                     }
                     write!(&mut w, ", {}, decl {}:{}, unit {}", &v.name, &v.decl_file, &v.decl_line, &function_stats.unit_name)?;
+
                     let mut v_stats_adjustment = None;
                     if adjusting_by_baseline {
                         if let Some(bv) = base_v {
@@ -258,26 +361,40 @@ fn main() -> Result<(), Box<dyn Error>> {
                                     // }
                                 }
                             }
-                            v_stats_adjustment = Some(VariableStatsAdjustment {
-                                source_lines_covered_adjusted: source_line_set_adjusted.len() as u64,
-                            });
+                            v_stats_adjustment = Some(source_line_set_adjusted.len() as u64);
                         }
                     }
+
                     // Disable display of diff to baseline when using it to adjust main ranges
                     let bv_stats = if adjusting_by_baseline {
                         None
                     } else {
                         base_v.map(|bv| &bv.stats)
                     };
-                    write_stats(&mut w, &v.stats, bv_stats, v_stats_adjustment.as_ref());
+
+                    let mut v_stats_filtered = None;
+                    if stats.opt.only_computation_regions {
+                        let computation_line_sets_by_file = computation_line_sets_by_file.as_ref().unwrap();
+                        let decl_file_path = Path::new(&v.decl_dir).join(&v.decl_file);
+                        let computation_line_set = computation_line_sets_by_file.get(decl_file_path.to_str().unwrap());
+                        if let Some(computation_line_set) = computation_line_set {
+                            let source_line_set_filtered = v.extra.source_line_set_covered.intersection(computation_line_set);
+                            v_stats_filtered = Some(source_line_set_filtered.count() as u64);
+                        } else {
+                            v_stats_filtered = Some(v.stats.source_lines_covered);
+                        }
+                    }
+
+                    write_stats(&mut w, &v.stats, bv_stats, v_stats_adjustment, v_stats_filtered);
                 }
             } else {
                 write!(&mut w, "{}, unit {}", &function_stats.name, &function_stats.unit_name)?;
-                write_stats(&mut w, &function_stats.stats, base_function_stats.map(|b| &b.stats), None);
+                write_stats(&mut w, &function_stats.stats, base_function_stats.map(|b| &b.stats), None, None);
             }
         }
         writeln!(&mut w)?;
     }
+
     if adjusting_by_baseline {
         base_stats = None;
     }
@@ -298,6 +415,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             write_stats_label(&mut w, "all", &all, base_all.as_ref(), &stats.opt);
         }
     }
+
     Ok(())
 }
 
