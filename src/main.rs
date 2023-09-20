@@ -8,7 +8,7 @@ use std::error::Error;
 use std::fs;
 use std::io::{self, BufWriter, Write, BufRead};
 use std::iter::Iterator;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process;
 
 use debuginfo_quality::*;
@@ -118,6 +118,7 @@ impl RegionLocation {
 enum RegionKind {
     Unsupported,
     Computation,
+    MustBeDefined,
 }
 
 #[derive(Debug)]
@@ -125,21 +126,30 @@ struct Region {
     start: RegionLocation,
     end: RegionLocation,
     kind: RegionKind,
+    detail: String,
 }
 
 impl Region {
     fn parse(line: &str) -> Result<Self, Box<dyn Error>> {
+        // Line format:
+        // start as `file:line:column`\t
+        // end as `file:line:column`\t
+        // kind (`Computation`, `MustBeDefined`)\t
+        // detail tail (e.g. expression type, variable description)
         let mut parts = line.split('\t');
         let start = RegionLocation::parse(parts.next().unwrap())?;
         let end = RegionLocation::parse(parts.next().unwrap())?;
         let kind = match parts.next().unwrap() {
             "Computation" => RegionKind::Computation,
+            "MustBeDefined" => RegionKind::MustBeDefined,
             _ => RegionKind::Unsupported,
         };
+        let detail = parts.next().unwrap().to_owned();
         Ok(Self {
             start,
             end,
             kind,
+            detail,
         })
     }
 }
@@ -148,11 +158,6 @@ fn parse_regions(bytes: &[u8]) -> Result<Vec<Region>, Box<dyn Error>> {
     let mut regions = Vec::new();
 
     for regions_line in bytes.lines() {
-        // Line format:
-        // start as `file:line:column`\t
-        // end as `file:line:column`\t
-        // kind (e.g. `Computation`)\t
-        // expression type
         let regions_line = regions_line.unwrap();
         let region = Region::parse(&regions_line)?;
         regions.push(region);
@@ -177,6 +182,24 @@ fn computation_line_sets_by_file(regions: &Vec<Region>) -> HashMap<String, BTree
     }
 
     line_sets_by_file
+}
+
+fn first_defined_line_by_variable(regions: &Vec<Region>) -> HashMap<String, u64> {
+    let mut line_by_variable = HashMap::new();
+
+    for region in regions {
+        if region.kind != RegionKind::MustBeDefined {
+            continue;
+        }
+
+        let variable = region.detail.clone();
+        let stored_line: &mut u64 = line_by_variable.entry(variable).or_insert(u64::MAX);
+        let current_line = &*stored_line;
+        let min_line = current_line.min(&region.start.line);
+        *stored_line = *min_line;
+    }
+
+    line_by_variable
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -256,7 +279,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let regions_map = opt.regions.as_ref().map(|path| map(path));
     let regions = regions_map.map(|r| parse_regions(&r));
-    let computation_line_sets_by_file = regions.map(|r| computation_line_sets_by_file(&r.unwrap()));
+    let computation_line_sets_by_file = regions
+        .as_ref()
+        .map(|r| computation_line_sets_by_file(r.as_ref().unwrap()));
+    let first_defined_line_by_variable = regions
+        .as_ref()
+        .map(|r| first_defined_line_by_variable(r.as_ref().unwrap()));
 
     let stdout = io::stdout();
     let mut stdout_locked = stdout.lock();
@@ -267,7 +295,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     write!(&mut w, "Name")?;
     let adjusting_by_baseline = stats.opt.range_start_baseline || stats.opt.extend_from_baseline;
-    let filtering_by_regions = stats.opt.only_computation_regions;
+    let filtering_by_regions = stats.opt.only_computation_regions || stats.opt.range_start_first_defined_region;
     if base_stats.is_some() && !adjusting_by_baseline {
         writeln!(&mut w,
                  "\t{:12}\t{:12}\t{:12}\t{:12}\
@@ -321,8 +349,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                     });
 
                     write!(&mut w, "{}", &function_stats.name)?;
-                    for inline in v.inlines {
-                        write!(&mut w, ", {}", &inline)?;
+                    for inline in &v.inlines {
+                        write!(&mut w, ", {}", inline)?;
                     }
                     write!(&mut w, ", {}, decl {}:{}, unit {}", &v.name, &v.decl_file, &v.decl_line, &function_stats.unit_name)?;
 
@@ -373,16 +401,40 @@ fn main() -> Result<(), Box<dyn Error>> {
                     };
 
                     let mut v_stats_filtered = None;
-                    if stats.opt.only_computation_regions {
-                        let computation_line_sets_by_file = computation_line_sets_by_file.as_ref().unwrap();
-                        let decl_file_path = Path::new(&v.decl_dir).join(&v.decl_file);
-                        let computation_line_set = computation_line_sets_by_file.get(decl_file_path.to_str().unwrap());
-                        if let Some(computation_line_set) = computation_line_set {
-                            let source_line_set_filtered = v.extra.source_line_set_covered.intersection(computation_line_set);
-                            v_stats_filtered = Some(source_line_set_filtered.count() as u64);
-                        } else {
-                            v_stats_filtered = Some(v.stats.source_lines_covered);
+                    if filtering_by_regions {
+                        let mut source_line_set_filtered = v.extra.source_line_set_covered.clone();
+                        if stats.opt.only_computation_regions {
+                            let computation_line_sets_by_file = computation_line_sets_by_file.as_ref().unwrap();
+                            let decl_file_path = Path::new(&v.decl_dir).join(&v.decl_file);
+                            let computation_line_set = computation_line_sets_by_file.get(decl_file_path.to_str().unwrap());
+                            if let Some(computation_line_set) = computation_line_set {
+                                source_line_set_filtered = source_line_set_filtered.intersection(computation_line_set).cloned().collect();
+                            }
                         }
+                        if stats.opt.range_start_first_defined_region {
+                            let first_defined_line_by_variable = first_defined_line_by_variable.as_ref().unwrap();
+                            let mut variable_description = function_stats.name.clone();
+                            for inline in &v.inlines {
+                                variable_description.push_str(format!(", {}", inline).as_str());
+                            }
+                            // Remove file extension to avoid `.i` vs. `.c` match failures
+                            let extensionless_unit = PathBuf::from(&function_stats.unit_name).with_extension("");
+                            variable_description.push_str(format!(
+                                ", {}, decl {}:{}, unit {}",
+                                &v.name, &v.decl_file, &v.decl_line, extensionless_unit.to_str().unwrap()
+                            ).as_str());
+                            // println!("{}", variable_description);
+                            let first_defined_line = first_defined_line_by_variable.get(&variable_description);
+                            // println!("first line: {:?}", first_defined_line);
+                            if let Some(first_defined_line) = first_defined_line {
+                                while source_line_set_filtered.first().unwrap_or(&u64::MAX) < first_defined_line {
+                                    source_line_set_filtered.pop_first();
+                                }
+                            } else {
+                                source_line_set_filtered.clear();
+                            }
+                        }
+                        v_stats_filtered = Some(source_line_set_filtered.len() as u64);
                     }
 
                     write_stats(&mut w, &v.stats, bv_stats, v_stats_adjustment, v_stats_filtered);

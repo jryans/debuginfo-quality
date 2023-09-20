@@ -98,9 +98,13 @@ pub struct Opt {
     /// File describing source line regions used to filter the covered lines in some way.
     #[structopt(long="regions", parse(from_os_str))]
     pub regions: Option<PathBuf>,
-    /// Filters covered lines to only those within a computation region.
+    /// Filters covered lines to only those within computation regions.
     #[structopt(long="only-computation-regions")]
     pub only_computation_regions: bool,
+    /// The first region where a given variable must be defined determines the start of the
+    /// covered source line range.
+    #[structopt(long="range-start-first-defined-region")]
+    pub range_start_first_defined_region: bool,
     /// File to analyze
     #[structopt(parse(from_os_str))]
     pub file: PathBuf,
