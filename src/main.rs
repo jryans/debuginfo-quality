@@ -118,6 +118,7 @@ impl RegionLocation {
 enum RegionKind {
     Unsupported,
     Computation,
+    MayBeDefined,
     MustBeDefined,
 }
 
@@ -141,6 +142,7 @@ impl Region {
         let end = RegionLocation::parse(parts.next().unwrap())?;
         let kind = match parts.next().unwrap() {
             "Computation" => RegionKind::Computation,
+            "MayBeDefined" => RegionKind::MayBeDefined,
             "MustBeDefined" => RegionKind::MustBeDefined,
             _ => RegionKind::Unsupported,
         };
@@ -188,7 +190,7 @@ fn first_defined_line_by_variable(regions: &Vec<Region>) -> HashMap<String, u64>
     let mut line_by_variable = HashMap::new();
 
     for region in regions {
-        if region.kind != RegionKind::MustBeDefined {
+        if region.kind != RegionKind::MayBeDefined && region.kind != RegionKind::MustBeDefined {
             continue;
         }
 
