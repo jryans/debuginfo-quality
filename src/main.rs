@@ -411,6 +411,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                             let computation_line_set = computation_line_sets_by_file.get(decl_file_path.to_str().unwrap());
                             if let Some(computation_line_set) = computation_line_set {
                                 source_line_set_filtered = source_line_set_filtered.intersection(computation_line_set).cloned().collect();
+                            } else {
+                                source_line_set_filtered.clear();
                             }
                         }
                         if stats.opt.range_start_first_defined_region {
