@@ -419,6 +419,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 }
                             }
                             v_stats_adjustment = Some(source_line_set_adjusted.len() as u64);
+                        } else {
+                            v_stats_adjustment = Some(0);
                         }
                     }
 
