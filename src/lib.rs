@@ -92,6 +92,10 @@ pub struct Opt {
     /// File describing source line regions used to filter the covered lines in some way.
     #[structopt(long="regions", parse(from_os_str))]
     pub regions: Option<PathBuf>,
+    /// Report source-based scope lines from declaration regions.
+    /// This will be further filtered by computation and definition regions if they are enabled.
+    #[structopt(long="scope-regions")]
+    pub scope_regions: bool,
     /// Filters covered lines to only those within computation regions.
     #[structopt(long="only-computation-regions")]
     pub only_computation_regions: bool,

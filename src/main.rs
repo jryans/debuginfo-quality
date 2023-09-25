@@ -48,6 +48,7 @@ fn write_stats<W: io::Write>(
     base_stats: Option<&VariableStats>,
     adj_lines: Option<u64>,
     flt_lines: Option<u64>,
+    src_scope_lines: Option<u64>,
 ) {
     assert!(base_stats.is_none() || adj_lines.is_none());
     if let Some(b) = base_stats {
@@ -74,6 +75,9 @@ fn write_stats<W: io::Write>(
         if let Some(flt_lines) = flt_lines {
             write!(w, "\t{:12}", flt_lines).unwrap();
         }
+        if let Some(src_scope_lines) = src_scope_lines {
+            write!(w, "\t{:12}", src_scope_lines).unwrap();
+        }
         writeln!(w).unwrap();
     }
 }
@@ -89,7 +93,7 @@ fn write_stats_label<W: io::Write>(
     if !opt.tsv && (opt.functions || opt.variables) {
         write!(&mut w, "\t\t\t\t").unwrap();
     }
-    write_stats(w, stats, base_stats, None, None);
+    write_stats(w, stats, base_stats, None, None, None);
 }
 
 // TODO: Use references instead of copying
@@ -115,6 +119,7 @@ impl RegionLocation {
 enum RegionKind {
     Unsupported,
     Computation,
+    DeclScope,
     MayBeDefined,
     MustBeDefined,
 }
@@ -139,6 +144,7 @@ impl Region {
         let end = RegionLocation::parse(parts.next().unwrap())?;
         let kind = match parts.next().unwrap() {
             "Computation" => RegionKind::Computation,
+            "DeclScope" => RegionKind::DeclScope,
             "MayBeDefined" => RegionKind::MayBeDefined,
             "MustBeDefined" => RegionKind::MustBeDefined,
             _ => RegionKind::Unsupported,
@@ -199,6 +205,24 @@ fn first_defined_line_by_variable(regions: &Vec<Region>) -> HashMap<String, u64>
     }
 
     line_by_variable
+}
+
+fn scope_line_sets_by_variable(regions: &Vec<Region>) -> HashMap<String, BTreeSet<u64>> {
+    let mut line_sets_by_variable = HashMap::new();
+
+    for region in regions {
+        if region.kind != RegionKind::DeclScope {
+            continue;
+        }
+
+        let variable = region.detail.clone();
+        let line_set: &mut BTreeSet<u64> = line_sets_by_variable.entry(variable).or_default();
+        for line in region.start.line..=region.end.line {
+            line_set.insert(line);
+        }
+    }
+
+    line_sets_by_variable
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -284,6 +308,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let first_defined_line_by_variable = regions
         .as_ref()
         .map(|r| first_defined_line_by_variable(r.as_ref().unwrap()));
+    let scope_line_sets_by_variable = regions
+        .as_ref()
+        .map(|r| scope_line_sets_by_variable(r.as_ref().unwrap()));
 
     let stdout = io::stdout();
     let mut stdout_locked = stdout.lock();
@@ -310,6 +337,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         if filtering_by_regions {
             write!(&mut w, "\t{:12}", "Flt Cov (L)")?;
+        }
+        if stats.opt.scope_regions {
+            write!(&mut w, "\t{:12}", "Src Scope (L)")?;
         }
         writeln!(&mut w)?;
     }
@@ -399,7 +429,21 @@ fn main() -> Result<(), Box<dyn Error>> {
                         base_v.map(|bv| &bv.stats)
                     };
 
+                    let mut variable_description = function_stats.name.clone();
+                    for inline in &v.inlines {
+                        variable_description.push_str(format!(", {}", inline).as_str());
+                    }
+                    // Remove file extension to avoid `.i` vs. `.c` match failures
+                    let extensionless_unit = PathBuf::from(&function_stats.unit_name).with_extension("");
+                    variable_description.push_str(format!(
+                        ", {}, decl {}:{}, unit {}",
+                        &v.name, &v.decl_file, &v.decl_line, extensionless_unit.to_str().unwrap()
+                    ).as_str());
+                    // println!("{}", variable_description);
+
                     let mut v_stats_filtered = None;
+                    let mut computation_line_set = None;
+                    let mut first_defined_line = None;
                     if filtering_by_regions {
                         let mut source_line_set_filtered = v.extra.source_line_set_covered.clone();
                         if stats.opt.only_computation_regions {
@@ -420,19 +464,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         }
                         if stats.opt.range_start_first_defined_region {
                             let first_defined_line_by_variable = first_defined_line_by_variable.as_ref().unwrap();
-                            let mut variable_description = function_stats.name.clone();
-                            for inline in &v.inlines {
-                                variable_description.push_str(format!(", {}", inline).as_str());
-                            }
-                            // Remove file extension to avoid `.i` vs. `.c` match failures
-                            let extensionless_unit = PathBuf::from(&function_stats.unit_name).with_extension("");
-                            variable_description.push_str(format!(
-                                ", {}, decl {}:{}, unit {}",
-                                &v.name, &v.decl_file, &v.decl_line, extensionless_unit.to_str().unwrap()
-                            ).as_str());
-                            // println!("{}", variable_description);
-                            let first_defined_line = first_defined_line_by_variable.get(&variable_description);
-                            // println!("first line: {:?}", first_defined_line);
+                            first_defined_line = first_defined_line_by_variable.get(&variable_description);
                             if let Some(first_defined_line) = first_defined_line {
                                 while source_line_set_filtered.first().unwrap_or(&u64::MAX) < first_defined_line {
                                     source_line_set_filtered.pop_first();
@@ -444,11 +476,38 @@ fn main() -> Result<(), Box<dyn Error>> {
                         v_stats_filtered = Some(source_line_set_filtered.len() as u64);
                     }
 
-                    write_stats(&mut w, &v.stats, bv_stats, v_stats_adjustment, v_stats_filtered);
+                    let mut src_scope_lines = None;
+                    if stats.opt.scope_regions {
+                        let scope_line_sets_by_variable = scope_line_sets_by_variable.as_ref().unwrap();
+                        let mut scope_line_set = scope_line_sets_by_variable.get(&variable_description).cloned();
+                        if stats.opt.only_computation_regions {
+                            if let Some(computation_line_set) = computation_line_set {
+                                scope_line_set = scope_line_set.map(|set| {
+                                    set.intersection(computation_line_set).cloned().collect()
+                                });
+                            }
+                        }
+                        if stats.opt.range_start_first_defined_region {
+                            if let Some(first_defined_line) = first_defined_line {
+                                scope_line_set.as_mut().map(|set| {
+                                    while set.first().unwrap_or(&u64::MAX) < first_defined_line {
+                                        set.pop_first();
+                                    }
+                                });
+                            } else {
+                                scope_line_set.as_mut().map(|set| {
+                                    set.clear();
+                                });
+                            }
+                        }
+                        src_scope_lines = Some(scope_line_set.map_or(0, |set| set.len() as u64));
+                    }
+
+                    write_stats(&mut w, &v.stats, bv_stats, v_stats_adjustment, v_stats_filtered, src_scope_lines);
                 }
             } else {
                 write!(&mut w, "{}, unit {}", &function_stats.name, &function_stats.unit_name)?;
-                write_stats(&mut w, &function_stats.stats, base_function_stats.map(|b| &b.stats), None, None);
+                write_stats(&mut w, &function_stats.stats, base_function_stats.map(|b| &b.stats), None, None, None);
             }
         }
         writeln!(&mut w)?;
