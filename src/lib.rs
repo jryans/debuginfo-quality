@@ -1,13 +1,7 @@
 #[macro_use]
 extern crate clap;
-extern crate cpp_demangle;
 #[macro_use]
 extern crate derive_more;
-extern crate fallible_iterator;
-extern crate gimli;
-extern crate rayon;
-extern crate regex;
-extern crate structopt;
 
 use std::borrow::Cow;
 use std::cmp::{max, min};

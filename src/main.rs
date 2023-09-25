@@ -1,7 +1,3 @@
-extern crate object;
-extern crate structopt;
-extern crate typed_arena;
-
 use std::borrow::{Borrow, Cow};
 use std::collections::{HashMap, BTreeSet};
 use std::error::Error;
