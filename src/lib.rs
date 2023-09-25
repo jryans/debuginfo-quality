@@ -137,6 +137,7 @@ pub struct ExtraVarInfo {
 #[derive(Clone)]
 pub struct FunctionStats {
     pub name: String,
+    pub unit_dir: String,
     pub unit_name: String,
     pub stats: VariableStats,
     pub variables: Vec<NamedVarStats>,
@@ -179,11 +180,12 @@ impl Stats {
 }
 
 impl<'a> UnitStats<'a> {
-    fn enter_noninline_function(&mut self, name: &MaybeDemangle<'a>, unit_name: &str) {
+    fn enter_noninline_function(&mut self, name: &MaybeDemangle<'a>, unit_dir: &str, unit_name: &str) {
         let demangled = name.demangled();
         self.noninline_function_stack.push(if self.opt.select_functions.as_ref().map(|r| r.is_match(&demangled)).unwrap_or(true) {
             Some(FunctionStats {
                 name: demangled.into_owned(),
+                unit_dir: unit_dir.into(),
                 unit_name: unit_name.into(),
                 stats: VariableStats::default(),
                 variables: Vec::new(),
@@ -485,6 +487,7 @@ pub fn evaluate_info<'a>(
                 unit_name = name.string_value(debug_str);
             }
         }
+        let unit_dir_for_output = unit_dir.map_or(Cow::Borrowed("<unknown directory>"), |n| n.to_string_lossy());
         let unit_name_for_output = unit_name.map_or(Cow::Borrowed("<unknown unit>"), |n| n.to_string_lossy());
         let line_program = line_program_offset.map(|offset| {
             debug_line.program(offset, unit.address_size(), unit_dir, unit_name).unwrap()
@@ -522,7 +525,7 @@ pub fn evaluate_info<'a>(
                 gimli::DW_TAG_variable => VarType::Variable,
                 gimli::DW_TAG_subprogram => {
                     if let Some(name) = lookup_name(&unit, &entry, &abbrevs, debug_str) {
-                        unit_stats.enter_noninline_function(&name, &unit_name_for_output);
+                        unit_stats.enter_noninline_function(&name, &unit_dir_for_output, &unit_name_for_output);
                         namespace_stack.push((name, depth, false));
                     }
                     continue;

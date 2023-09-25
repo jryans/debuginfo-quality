@@ -9,6 +9,7 @@ use std::process;
 
 use debuginfo_quality::*;
 use object::{Object, ObjectSection};
+use relative_path::{PathExt, RelativePathBuf};
 use structopt::StructOpt;
 use typed_arena::Arena;
 
@@ -404,7 +405,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                         if stats.opt.only_computation_regions {
                             let computation_line_sets_by_file = computation_line_sets_by_file.as_ref().unwrap();
                             let decl_file_path = Path::new(&v.decl_dir).join(&v.decl_file);
-                            let computation_line_set = computation_line_sets_by_file.get(decl_file_path.to_str().unwrap());
+                            // Some decl file paths are relative while others are absolute
+                            let rel_decl_file_path = if decl_file_path.is_absolute() {
+                                decl_file_path.relative_to(&function_stats.unit_dir).unwrap()
+                            } else {
+                                RelativePathBuf::from_path(decl_file_path).unwrap()
+                            };
+                            computation_line_set = computation_line_sets_by_file.get(rel_decl_file_path.as_str());
                             if let Some(computation_line_set) = computation_line_set {
                                 source_line_set_filtered = source_line_set_filtered.intersection(computation_line_set).cloned().collect();
                             } else {

@@ -150,6 +150,7 @@ dependencies = [
  "object",
  "rayon",
  "regex",
+ "relative-path",
  "structopt",
  "typed-arena",
 ]
@@ -359,6 +360,12 @@ checksum = "fbc557aac2b708fe84121caf261346cc2eed71978024337e42eb46b8a252ac6e"
 dependencies = [
  "ucd-util",
 ]
+
+[[package]]
+name = "relative-path"
+version = "1.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c707298afce11da2efef2f600116fa93ffa7a032b5d7b628aa17711ec81383ca"
 
 [[package]]
 name = "rustc_version"
