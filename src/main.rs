@@ -1,8 +1,8 @@
 use std::borrow::{Borrow, Cow};
-use std::collections::{HashMap, BTreeSet};
+use std::collections::{BTreeSet, HashMap};
 use std::error::Error;
 use std::fs;
-use std::io::{self, BufWriter, Write, BufRead};
+use std::io::{self, BufRead, BufWriter, Write};
 use std::iter::Iterator;
 use std::path::{Path, PathBuf};
 use std::process;
@@ -52,23 +52,29 @@ fn write_stats<W: io::Write>(
 ) {
     assert!(base_stats.is_none() || adj_lines.is_none());
     if let Some(b) = base_stats {
-        writeln!(w,
-                 "\t{:12}\t{:12}\t{:12}\t{:12}\
-                  \t{:12}\t{:12}\t{:12}\t{:12}",
-                 stats.instruction_bytes_covered,
-                 stats.instruction_bytes_in_scope,
-                 b.instruction_bytes_covered,
-                 b.instruction_bytes_in_scope,
-                 stats.source_lines_covered,
-                 stats.source_lines_in_scope,
-                 b.source_lines_covered,
-                 b.source_lines_in_scope).unwrap();
+        writeln!(
+            w,
+            "\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}",
+            stats.instruction_bytes_covered,
+            stats.instruction_bytes_in_scope,
+            b.instruction_bytes_covered,
+            b.instruction_bytes_in_scope,
+            stats.source_lines_covered,
+            stats.source_lines_in_scope,
+            b.source_lines_covered,
+            b.source_lines_in_scope
+        )
+        .unwrap();
     } else {
-        write!(w, "\t{:12}\t{:12}\t{:12}\t{:12}",
-               stats.instruction_bytes_covered,
-               stats.instruction_bytes_in_scope,
-               stats.source_lines_covered,
-               stats.source_lines_in_scope).unwrap();
+        write!(
+            w,
+            "\t{:12}\t{:12}\t{:12}\t{:12}",
+            stats.instruction_bytes_covered,
+            stats.instruction_bytes_in_scope,
+            stats.source_lines_covered,
+            stats.source_lines_in_scope
+        )
+        .unwrap();
         if let Some(adj_lines) = adj_lines {
             write!(w, "\t{:12}", adj_lines).unwrap();
         }
@@ -108,10 +114,7 @@ impl RegionLocation {
         let mut parts = location.split(':');
         let file = parts.next().unwrap().to_string();
         let line = parts.next().unwrap().parse()?;
-        Ok(Self {
-            file,
-            line,
-        })
+        Ok(Self { file, line })
     }
 }
 
@@ -244,17 +247,23 @@ fn main() -> Result<(), Box<dyn Error>> {
     where
         S: gimli::Section<gimli::EndianSlice<'a, gimli::LittleEndian>>,
         'file: 'input,
-        'a: 'file
+        'a: 'file,
     {
         let data = match file.section_by_name(S::section_name()) {
-            Some(ref section) => section.uncompressed_data().unwrap_or(Cow::Borrowed(&[][..])),
+            Some(ref section) => section
+                .uncompressed_data()
+                .unwrap_or(Cow::Borrowed(&[][..])),
             None => Cow::Borrowed(&[][..]),
         };
         let data_ref = (*arena.alloc(data)).borrow();
         S::from(gimli::EndianSlice::new(data_ref, gimli::LittleEndian))
     }
 
-    let mut stats = Stats { bundle: StatsBundle::default(), opt: opt.clone(), output: Vec::new() };
+    let mut stats = Stats {
+        bundle: StatsBundle::default(),
+        opt: opt.clone(),
+        output: Vec::new(),
+    };
     let mut base_stats = None;
 
     {
@@ -274,8 +283,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         let loclists = &gimli::LocationLists::new(debug_loc, debug_loclists).unwrap();
         let debug_line = &load_section(&arena, file);
 
-        evaluate_info(debug_info, debug_abbrev, debug_str, rnglists, loclists, debug_line,
-                      stats.opt.no_entry_value, stats.opt.no_parameter_ref, &mut stats);
+        evaluate_info(
+            debug_info,
+            debug_abbrev,
+            debug_str,
+            rnglists,
+            loclists,
+            debug_line,
+            stats.opt.no_entry_value,
+            stats.opt.no_parameter_ref,
+            &mut stats,
+        );
     }
 
     if let Some(file) = baseline_file.as_ref() {
@@ -294,9 +312,22 @@ fn main() -> Result<(), Box<dyn Error>> {
         let loclists = &gimli::LocationLists::new(debug_loc, debug_loclists)?;
         let debug_line = &load_section(&arena, file);
 
-        let mut stats = Stats { bundle: StatsBundle::default(), opt: opt.clone(), output: Vec::new() };
-        evaluate_info(debug_info, debug_abbrev, debug_str, rnglists, loclists, debug_line,
-                      stats.opt.no_entry_value_baseline, stats.opt.no_parameter_ref_baseline, &mut stats);
+        let mut stats = Stats {
+            bundle: StatsBundle::default(),
+            opt: opt.clone(),
+            output: Vec::new(),
+        };
+        evaluate_info(
+            debug_info,
+            debug_abbrev,
+            debug_str,
+            rnglists,
+            loclists,
+            debug_line,
+            stats.opt.no_entry_value_baseline,
+            stats.opt.no_parameter_ref_baseline,
+            &mut stats,
+        );
         base_stats = Some(stats);
     }
 
@@ -321,17 +352,27 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     write!(&mut w, "Name")?;
     let adjusting_by_baseline = stats.opt.range_start_baseline || stats.opt.extend_from_baseline;
-    let filtering_by_regions = stats.opt.only_computation_regions || stats.opt.range_start_first_defined_region;
+    let filtering_by_regions =
+        stats.opt.only_computation_regions || stats.opt.range_start_first_defined_region;
     if base_stats.is_some() && !adjusting_by_baseline {
-        writeln!(&mut w,
-                 "\t{:12}\t{:12}\t{:12}\t{:12}\
-                  \t{:12}\t{:12}\t{:12}\t{:12}",
-                 "Cov (B)", "Scope (B)", "BaseCov (B)", "BaseScope (B)",
-                 "Cov (L)", "Scope (L)", "BaseCov (L)", "BaseScope (L)")?;
+        writeln!(
+            &mut w,
+            "\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}",
+            "Cov (B)",
+            "Scope (B)",
+            "BaseCov (B)",
+            "BaseScope (B)",
+            "Cov (L)",
+            "Scope (L)",
+            "BaseCov (L)",
+            "BaseScope (L)"
+        )?;
     } else {
-        write!(&mut w, "\t{:12}\t{:12}\t{:12}\t{:12}",
-               "Cov (B)", "Scope (B)",
-               "Cov (L)", "Scope (L)")?;
+        write!(
+            &mut w,
+            "\t{:12}\t{:12}\t{:12}\t{:12}",
+            "Cov (B)", "Scope (B)", "Cov (L)", "Scope (L)"
+        )?;
         if adjusting_by_baseline {
             write!(&mut w, "\t{:12}", "Adj Cov (L)")?;
         }
@@ -346,30 +387,37 @@ fn main() -> Result<(), Box<dyn Error>> {
     writeln!(&mut w)?;
 
     if stats.opt.functions || stats.opt.variables {
-        let mut functions: Vec<(FunctionStats, Option<&FunctionStats>)> = if let Some(base) = base_stats.as_ref() {
-            let mut base_functions = HashMap::new();
-            // TODO: Avoid cloning keys here...?
-            for f in base.output.iter() {
-                base_functions.insert((f.name.clone(), f.unit_name.clone()), f);
-            }
-            stats.output.into_iter().filter_map(|o|
-                base_functions.get(&(o.name.clone(), o.unit_name.clone())).map(|b| (o, Some(*b)))
-            ).collect()
-        } else {
-            stats.output.into_iter().map(|o| (o, None)).collect()
-        };
+        let mut functions: Vec<(FunctionStats, Option<&FunctionStats>)> =
+            if let Some(base) = base_stats.as_ref() {
+                let mut base_functions = HashMap::new();
+                // TODO: Avoid cloning keys here...?
+                for f in base.output.iter() {
+                    base_functions.insert((f.name.clone(), f.unit_name.clone()), f);
+                }
+                stats
+                    .output
+                    .into_iter()
+                    .filter_map(|o| {
+                        base_functions
+                            .get(&(o.name.clone(), o.unit_name.clone()))
+                            .map(|b| (o, Some(*b)))
+                    })
+                    .collect()
+            } else {
+                stats.output.into_iter().map(|o| (o, None)).collect()
+            };
         functions.sort_by(|a, b| goodness(a).partial_cmp(&goodness(b)).unwrap());
         for (function_stats, base_function_stats) in functions {
             if stats.opt.variables {
                 let unit_name = function_stats.unit_name.clone();
                 for v in function_stats.variables {
                     let base_v = base_function_stats.and_then(|bf| {
-                        let mut same_v = bf.variables.iter().filter(|&bv|
-                            bv.name == v.name &&
-                            bv.decl_file == v.decl_file &&
-                            bv.decl_line == v.decl_line &&
-                            bf.unit_name == unit_name
-                        );
+                        let mut same_v = bf.variables.iter().filter(|&bv| {
+                            bv.name == v.name
+                                && bv.decl_file == v.decl_file
+                                && bv.decl_line == v.decl_line
+                                && bf.unit_name == unit_name
+                        });
                         if same_v.clone().count() == 1 {
                             same_v.next()
                         } else {
@@ -381,17 +429,24 @@ fn main() -> Result<(), Box<dyn Error>> {
                     for inline in &v.inlines {
                         write!(&mut w, ", {}", inline)?;
                     }
-                    write!(&mut w, ", {}, decl {}:{}, unit {}", &v.name, &v.decl_file, &v.decl_line, &function_stats.unit_name)?;
+                    write!(
+                        &mut w,
+                        ", {}, decl {}:{}, unit {}",
+                        &v.name, &v.decl_file, &v.decl_line, &function_stats.unit_name
+                    )?;
 
                     let mut v_stats_adjustment = None;
                     if adjusting_by_baseline {
                         if let Some(bv) = base_v {
-                            let mut source_line_set_adjusted = v.extra.source_line_set_covered.clone();
+                            let mut source_line_set_adjusted =
+                                v.extra.source_line_set_covered.clone();
                             if stats.opt.range_start_baseline {
                                 // Baseline defines the start of coverage in source line terms
                                 if let Some(start_line) = bv.extra.source_line_set_covered.first() {
                                     // let mut trimmed = false;
-                                    while source_line_set_adjusted.first().unwrap_or(&u64::MAX) < start_line {
+                                    while source_line_set_adjusted.first().unwrap_or(&u64::MAX)
+                                        < start_line
+                                    {
                                         source_line_set_adjusted.pop_first();
                                         // trimmed = true;
                                     }
@@ -409,8 +464,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                             }
                             if stats.opt.extend_from_baseline {
                                 // Add additional range from end of baseline to end of scope
-                                if let Some(source_line_set_after_covered) = &bv.extra.source_line_set_after_covered {
-                                    source_line_set_adjusted.append(&mut source_line_set_after_covered.clone());
+                                if let Some(source_line_set_after_covered) =
+                                    &bv.extra.source_line_set_after_covered
+                                {
+                                    source_line_set_adjusted
+                                        .append(&mut source_line_set_after_covered.clone());
                                     // if !source_line_set_after_covered.is_empty() {
                                     //     println!("After cov. source line set: {:?}", source_line_set_after_covered);
                                     //     println!("Main       source line set: {:?}", v.extra.source_line_set_covered);
@@ -436,11 +494,18 @@ fn main() -> Result<(), Box<dyn Error>> {
                         variable_description.push_str(format!(", {}", inline).as_str());
                     }
                     // Remove file extension to avoid `.i` vs. `.c` match failures
-                    let extensionless_unit = PathBuf::from(&function_stats.unit_name).with_extension("");
-                    variable_description.push_str(format!(
-                        ", {}, decl {}:{}, unit {}",
-                        &v.name, &v.decl_file, &v.decl_line, extensionless_unit.to_str().unwrap()
-                    ).as_str());
+                    let extensionless_unit =
+                        PathBuf::from(&function_stats.unit_name).with_extension("");
+                    variable_description.push_str(
+                        format!(
+                            ", {}, decl {}:{}, unit {}",
+                            &v.name,
+                            &v.decl_file,
+                            &v.decl_line,
+                            extensionless_unit.to_str().unwrap()
+                        )
+                        .as_str(),
+                    );
                     // println!("{}", variable_description);
 
                     let mut v_stats_filtered = None;
@@ -450,28 +515,32 @@ fn main() -> Result<(), Box<dyn Error>> {
                     if filtering_by_regions {
                         source_line_set_filtered = Some(v.extra.source_line_set_covered.clone());
                         if stats.opt.only_computation_regions {
-                            let computation_line_sets_by_file = computation_line_sets_by_file.as_ref().unwrap();
+                            let computation_line_sets_by_file =
+                                computation_line_sets_by_file.as_ref().unwrap();
                             let decl_file_path = Path::new(&v.decl_dir).join(&v.decl_file);
                             // Some decl file paths are relative while others are absolute
                             let rel_decl_file_path = if decl_file_path.is_absolute() {
-                                decl_file_path.relative_to(&function_stats.unit_dir).unwrap()
+                                decl_file_path
+                                    .relative_to(&function_stats.unit_dir)
+                                    .unwrap()
                             } else {
                                 RelativePathBuf::from_path(decl_file_path).unwrap()
                             };
-                            computation_line_set = computation_line_sets_by_file.get(rel_decl_file_path.as_str());
+                            computation_line_set =
+                                computation_line_sets_by_file.get(rel_decl_file_path.as_str());
                             if let Some(computation_line_set) = computation_line_set {
                                 source_line_set_filtered = source_line_set_filtered.map(|set| {
                                     set.intersection(computation_line_set).cloned().collect()
                                 });
                             } else {
-                                source_line_set_filtered.as_mut().map(|set| {
-                                    set.clear()
-                                });
+                                source_line_set_filtered.as_mut().map(|set| set.clear());
                             }
                         }
                         if stats.opt.range_start_first_defined_region {
-                            let first_defined_line_by_variable = first_defined_line_by_variable.as_ref().unwrap();
-                            first_defined_line = first_defined_line_by_variable.get(&variable_description);
+                            let first_defined_line_by_variable =
+                                first_defined_line_by_variable.as_ref().unwrap();
+                            first_defined_line =
+                                first_defined_line_by_variable.get(&variable_description);
                             if let Some(first_defined_line) = first_defined_line {
                                 source_line_set_filtered.as_mut().map(|set| {
                                     while set.first().unwrap_or(&u64::MAX) < first_defined_line {
@@ -484,14 +553,19 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 });
                             }
                         }
-                        v_stats_filtered = source_line_set_filtered.as_ref().map(|set| set.len() as u64);
+                        v_stats_filtered = source_line_set_filtered
+                            .as_ref()
+                            .map(|set| set.len() as u64);
                     }
 
                     let mut src_scope_lines = None;
                     let mut scope_line_set = None;
                     if stats.opt.scope_regions {
-                        let scope_line_sets_by_variable = scope_line_sets_by_variable.as_ref().unwrap();
-                        scope_line_set = scope_line_sets_by_variable.get(&variable_description).cloned();
+                        let scope_line_sets_by_variable =
+                            scope_line_sets_by_variable.as_ref().unwrap();
+                        scope_line_set = scope_line_sets_by_variable
+                            .get(&variable_description)
+                            .cloned();
                         if stats.opt.only_computation_regions {
                             if let Some(computation_line_set) = computation_line_set {
                                 scope_line_set = scope_line_set.map(|set| {
@@ -512,15 +586,17 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 });
                             }
                         }
-                        src_scope_lines = Some(scope_line_set.as_ref().map_or(0, |set| set.len() as u64));
+                        src_scope_lines =
+                            Some(scope_line_set.as_ref().map_or(0, |set| set.len() as u64));
                     }
 
                     if filtering_by_regions && stats.opt.scope_regions {
                         if let Some(scope_line_set) = scope_line_set.as_ref() {
-                            source_line_set_filtered = source_line_set_filtered.map(|set| {
-                                set.intersection(scope_line_set).cloned().collect()
-                            });
-                            v_stats_filtered = source_line_set_filtered.as_ref().map(|set| set.len() as u64);
+                            source_line_set_filtered = source_line_set_filtered
+                                .map(|set| set.intersection(scope_line_set).cloned().collect());
+                            v_stats_filtered = source_line_set_filtered
+                                .as_ref()
+                                .map(|set| set.len() as u64);
                         }
                         // We could clear filtered coverage when scope lines are missing,
                         // but presumably the NaN from N / 0 already suggests a problem.
@@ -535,11 +611,29 @@ fn main() -> Result<(), Box<dyn Error>> {
                     //     println!("Filtered line set: {:?}", source_line_set_filtered);
                     // }
 
-                    write_stats(&mut w, &v.stats, bv_stats, v_stats_adjustment, v_stats_filtered, src_scope_lines);
+                    write_stats(
+                        &mut w,
+                        &v.stats,
+                        bv_stats,
+                        v_stats_adjustment,
+                        v_stats_filtered,
+                        src_scope_lines,
+                    );
                 }
             } else {
-                write!(&mut w, "{}, unit {}", &function_stats.name, &function_stats.unit_name)?;
-                write_stats(&mut w, &function_stats.stats, base_function_stats.map(|b| &b.stats), None, None, None);
+                write!(
+                    &mut w,
+                    "{}, unit {}",
+                    &function_stats.name, &function_stats.unit_name
+                )?;
+                write_stats(
+                    &mut w,
+                    &function_stats.stats,
+                    base_function_stats.map(|b| &b.stats),
+                    None,
+                    None,
+                    None,
+                );
             }
         }
         writeln!(&mut w)?;
@@ -554,14 +648,28 @@ fn main() -> Result<(), Box<dyn Error>> {
     // accumulated output.
     if !adjusting_by_baseline && !stats.opt.tsv {
         if !stats.opt.only_locals {
-            write_stats_label(&mut w, "params", &stats.bundle.parameters, base_stats.as_ref().map(|b| &b.bundle.parameters), &stats.opt);
+            write_stats_label(
+                &mut w,
+                "params",
+                &stats.bundle.parameters,
+                base_stats.as_ref().map(|b| &b.bundle.parameters),
+                &stats.opt,
+            );
         }
         if !stats.opt.only_parameters {
-            write_stats_label(&mut w, "vars", &stats.bundle.variables, base_stats.as_ref().map(|b| &b.bundle.variables), &stats.opt);
+            write_stats_label(
+                &mut w,
+                "vars",
+                &stats.bundle.variables,
+                base_stats.as_ref().map(|b| &b.bundle.variables),
+                &stats.opt,
+            );
         }
         if !stats.opt.only_locals && !stats.opt.only_parameters {
             let all = stats.bundle.variables + stats.bundle.parameters;
-            let base_all = base_stats.as_ref().map(|b| b.bundle.variables.clone() + b.bundle.parameters.clone());
+            let base_all = base_stats
+                .as_ref()
+                .map(|b| b.bundle.variables.clone() + b.bundle.parameters.clone());
             write_stats_label(&mut w, "all", &all, base_all.as_ref(), &stats.opt);
         }
     }
@@ -570,9 +678,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn goodness(&(ref a, ref a_base): &(FunctionStats, Option<&FunctionStats>)) -> (f64, i64) {
-    (if let Some(a_base) = a_base.as_ref() {
-        a.stats.fraction_bytes_covered() - a_base.stats.fraction_bytes_covered()
-    } else {
-        a.stats.fraction_bytes_covered()
-    }, -(a.stats.instruction_bytes_in_scope as i64))
+    (
+        if let Some(a_base) = a_base.as_ref() {
+            a.stats.fraction_bytes_covered() - a_base.stats.fraction_bytes_covered()
+        } else {
+            a.stats.fraction_bytes_covered()
+        },
+        -(a.stats.instruction_bytes_in_scope as i64),
+    )
 }

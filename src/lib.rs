@@ -64,44 +64,48 @@ pub struct Opt {
     #[structopt(long = "only-parameters")]
     pub only_parameters: bool,
     /// Regex to match function names against
-    #[structopt(short = "s", long="select-functions")]
+    #[structopt(short = "s", long = "select-functions")]
     pub select_functions: Option<Regex>,
     /// Languages to look at
-    #[structopt(short = "l", long="language", raw(possible_values = "&Language::variants()", case_insensitive = "true"))]
+    #[structopt(
+        short = "l",
+        long = "language",
+        raw(possible_values = "&Language::variants()", case_insensitive = "true")
+    )]
     pub language: Option<Language>,
     /// Output using tab-separated values (TSV) format
-    #[structopt(long="tsv")]
+    #[structopt(long = "tsv")]
     pub tsv: bool,
     /// File to use as a baseline. We try to match up functions in this file
     /// against functions in the main file; for all matches, subtract the scope coverage
     /// percentage in the baseline from the percentage of the main file.
-    #[structopt(long="baseline", parse(from_os_str))]
+    #[structopt(long = "baseline", parse(from_os_str))]
     pub baseline: Option<PathBuf>,
     /// Baseline defines the start of coverage in source line terms. We match all variables in this
     /// file to the main file. For each variable in the main file, the source line range is trimmed
     /// to start on the first source line used for that variable in this file.
-    #[structopt(long="range-start-baseline")]
+    #[structopt(long = "range-start-baseline")]
     pub range_start_baseline: bool,
     /// Extend variable source line range from end of baseline to the end of parent scope. We match
     /// all variables in this file to the main file. For each variable in the main file, an
     /// additional coverage source line range is added from the point where baseline coverage ends
     /// to the end of parent scope. This simulates a debugging workflow that keeps variables live
     /// until the end of their scope.
-    #[structopt(long="extend-from-baseline")]
+    #[structopt(long = "extend-from-baseline")]
     pub extend_from_baseline: bool,
     /// File describing source line regions used to filter the covered lines in some way.
-    #[structopt(long="regions", parse(from_os_str))]
+    #[structopt(long = "regions", parse(from_os_str))]
     pub regions: Option<PathBuf>,
     /// Report source-based scope lines from declaration regions.
     /// This will be further filtered by computation and definition regions if they are enabled.
-    #[structopt(long="scope-regions")]
+    #[structopt(long = "scope-regions")]
     pub scope_regions: bool,
     /// Filters covered lines to only those within computation regions.
-    #[structopt(long="only-computation-regions")]
+    #[structopt(long = "only-computation-regions")]
     pub only_computation_regions: bool,
     /// The first region where a given variable must be defined determines the start of the
     /// covered source line range.
-    #[structopt(long="range-start-first-defined-region")]
+    #[structopt(long = "range-start-first-defined-region")]
     pub range_start_first_defined_region: bool,
     /// File to analyze
     #[structopt(parse(from_os_str))]
@@ -184,37 +188,61 @@ impl Stats {
 }
 
 impl<'a> UnitStats<'a> {
-    fn enter_noninline_function(&mut self, name: &MaybeDemangle<'a>, unit_dir: &str, unit_name: &str) {
+    fn enter_noninline_function(
+        &mut self,
+        name: &MaybeDemangle<'a>,
+        unit_dir: &str,
+        unit_name: &str,
+    ) {
         let demangled = name.demangled();
-        self.noninline_function_stack.push(if self.opt.select_functions.as_ref().map(|r| r.is_match(&demangled)).unwrap_or(true) {
-            Some(FunctionStats {
-                name: demangled.into_owned(),
-                unit_dir: unit_dir.into(),
-                unit_name: unit_name.into(),
-                stats: VariableStats::default(),
-                variables: Vec::new(),
-            })
-        } else {
-            None
-        });
+        self.noninline_function_stack.push(
+            if self
+                .opt
+                .select_functions
+                .as_ref()
+                .map(|r| r.is_match(&demangled))
+                .unwrap_or(true)
+            {
+                Some(FunctionStats {
+                    name: demangled.into_owned(),
+                    unit_dir: unit_dir.into(),
+                    unit_name: unit_name.into(),
+                    stats: VariableStats::default(),
+                    variables: Vec::new(),
+                })
+            } else {
+                None
+            },
+        );
     }
     fn process_variables(&self) -> bool {
-        self.noninline_function_stack.last().map(|o| o.is_some()).unwrap_or(false)
+        self.noninline_function_stack
+            .last()
+            .map(|o| o.is_some())
+            .unwrap_or(false)
     }
-    fn accumulate(&mut self,
-                  var_type: VarType,
-                  subprogram_name_stack: &[(MaybeDemangle, isize, bool)],
-                  var_name: Option<MaybeDemangle>,
-                  var_decl_dir: &str,
-                  var_decl_file: &str,
-                  var_decl_line: &str,
-                  extra_var_info: ExtraVarInfo,
-                  stats: VariableStats) {
-        if (self.opt.only_parameters && var_type != VarType::Parameter) ||
-            (self.opt.only_locals && var_type != VarType::Variable) {
+    fn accumulate(
+        &mut self,
+        var_type: VarType,
+        subprogram_name_stack: &[(MaybeDemangle, isize, bool)],
+        var_name: Option<MaybeDemangle>,
+        var_decl_dir: &str,
+        var_decl_file: &str,
+        var_decl_line: &str,
+        extra_var_info: ExtraVarInfo,
+        stats: VariableStats,
+    ) {
+        if (self.opt.only_parameters && var_type != VarType::Parameter)
+            || (self.opt.only_locals && var_type != VarType::Variable)
+        {
             return;
         }
-        let function_stats = self.noninline_function_stack.last_mut().unwrap().as_mut().unwrap();
+        let function_stats = self
+            .noninline_function_stack
+            .last_mut()
+            .unwrap()
+            .as_mut()
+            .unwrap();
         let mut i = subprogram_name_stack.len();
         while i > 0 && subprogram_name_stack[i - 1].2 {
             i -= 1;
@@ -226,8 +254,14 @@ impl<'a> UnitStats<'a> {
         }
         if self.opt.variables {
             function_stats.variables.push(NamedVarStats {
-                inlines: subprogram_name_stack[i..].iter().map(|&(ref name, _, _)| name.demangled().into_owned()).collect(),
-                name: var_name.map(|d| d.demangled()).unwrap_or(Cow::Borrowed("<anon>")).into_owned(),
+                inlines: subprogram_name_stack[i..]
+                    .iter()
+                    .map(|&(ref name, _, _)| name.demangled().into_owned())
+                    .collect(),
+                name: var_name
+                    .map(|d| d.demangled())
+                    .unwrap_or(Cow::Borrowed("<anon>"))
+                    .into_owned(),
                 decl_dir: var_decl_dir.into(),
                 decl_file: var_decl_file.into(),
                 decl_line: var_decl_line.into(),
@@ -238,8 +272,9 @@ impl<'a> UnitStats<'a> {
     }
     fn leave_noninline_function(&mut self) {
         if let Some(function_stats) = self.noninline_function_stack.pop().unwrap() {
-            if function_stats.stats.instruction_bytes_in_scope > 0 &&
-                (self.opt.functions || self.opt.variables) {
+            if function_stats.stats.instruction_bytes_in_scope > 0
+                && (self.opt.functions || self.opt.variables)
+            {
                 self.output.push(function_stats);
             }
         }
@@ -249,7 +284,7 @@ impl<'a> UnitStats<'a> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum VarType {
     Parameter,
-    Variable
+    Variable,
 }
 
 #[derive(Clone, Debug, Add, AddAssign, Default)]
@@ -262,12 +297,12 @@ pub struct VariableStats {
 
 impl VariableStats {
     pub fn fraction_bytes_covered(&self) -> f64 {
-        (self.instruction_bytes_covered as f64)/(self.instruction_bytes_in_scope as f64)
+        (self.instruction_bytes_covered as f64) / (self.instruction_bytes_in_scope as f64)
     }
 }
 
 fn ranges_instruction_bytes(r: &[gimli::Range]) -> u64 {
-    r.iter().fold(0, |sum, r| { sum + (r.end - r.begin) })
+    r.iter().fold(0, |sum, r| sum + (r.end - r.begin))
 }
 
 fn ranges_end(r: &[gimli::Range]) -> Option<u64> {
@@ -294,18 +329,27 @@ fn ranges_overlap(rs1: &[gimli::Range], rs2: &[gimli::Range]) -> Vec<gimli::Rang
         let overlap_start = max(r1.begin, r2.begin);
         let overlap_end = min(r1.end, r2.end);
         if overlap_start < overlap_end {
-            result.push(gimli::Range { begin: overlap_start, end: overlap_end });
+            result.push(gimli::Range {
+                begin: overlap_start,
+                end: overlap_end,
+            });
         }
         let new_min = overlap_end;
         r1_opt = if r1.end <= new_min {
             iter1.next().map(|r| *r)
         } else {
-            Some(gimli::Range { begin: max(r1.begin, new_min), end: r1.end })
+            Some(gimli::Range {
+                begin: max(r1.begin, new_min),
+                end: r1.end,
+            })
         };
         r2_opt = if r2.end <= new_min {
             iter2.next().map(|r| *r)
         } else {
-            Some(gimli::Range { begin: max(r2.begin, new_min), end: r2.end })
+            Some(gimli::Range {
+                begin: max(r2.begin, new_min),
+                end: r2.end,
+            })
         };
     }
     result
@@ -316,8 +360,11 @@ fn ranges_source_lines<R: Reader>(
     line_program: gimli::IncompleteLineNumberProgram<R>,
 ) -> (u64, BTreeSet<u64>) {
     let mut line_sm = line_program.rows();
-    let mut row = line_sm.next_row().unwrap()
-                         .expect("Next row should exist in line table").1;
+    let mut row = line_sm
+        .next_row()
+        .unwrap()
+        .expect("Next row should exist in line table")
+        .1;
     let mut previous_row_line = None;
     // Instructions may mark out non-contiguous, overlapping source line ranges.
     // A source line set allows accurate counting even with overlaps.
@@ -328,8 +375,11 @@ fn ranges_source_lines<R: Reader>(
             // Continue until we find a row for beginning of range (may not be exact match)
             if row.address() < range.begin {
                 previous_row_line = row.line();
-                row = line_sm.next_row().unwrap()
-                             .expect("Next row should exist in line table").1;
+                row = line_sm
+                    .next_row()
+                    .unwrap()
+                    .expect("Next row should exist in line table")
+                    .1;
                 continue;
             }
             // If the start of the instruction range is between two line table rows,
@@ -349,8 +399,11 @@ fn ranges_source_lines<R: Reader>(
             if let Some(line) = row.line() {
                 source_line_set.insert(line);
             }
-            row = line_sm.next_row().unwrap()
-                         .expect("Next row should exist in line table").1;
+            row = line_sm
+                .next_row()
+                .unwrap()
+                .expect("Next row should exist in line table")
+                .1;
         }
     }
     // println!("Total: {}", source_line_set.len());
@@ -364,15 +417,19 @@ fn sort_nonoverlapping(rs: &mut [gimli::Range]) {
     }
 }
 
-fn to_ref_str<'abbrev, 'unit, R>(unit: &'unit CompilationUnitHeader<R, R::Offset>,
-                                 entry: &gimli::DebuggingInformationEntry<'abbrev, 'unit, R>) -> String
-    where R: Reader {
+fn to_ref_str<'abbrev, 'unit, R>(
+    unit: &'unit CompilationUnitHeader<R, R::Offset>,
+    entry: &gimli::DebuggingInformationEntry<'abbrev, 'unit, R>,
+) -> String
+where
+    R: Reader,
+{
     format!("{:x}:{:x}", unit.offset().0, entry.offset().0)
 }
 
 enum MaybeDemangle<'a> {
     Demangle(Cow<'a, str>),
-    Raw(Cow<'a, str>)
+    Raw(Cow<'a, str>),
 }
 
 impl<'a> MaybeDemangle<'a> {
@@ -388,31 +445,45 @@ impl<'a> MaybeDemangle<'a> {
                     s.clone()
                 }
             }
-            &MaybeDemangle::Raw(ref s) => {
-                s.clone()
-            }
+            &MaybeDemangle::Raw(ref s) => s.clone(),
         }
     }
 }
 
-fn lookup_name<'abbrev, 'unit, 'a>(unit: &'unit CompilationUnitHeader<EndianSlice<'a, gimli::LittleEndian>, usize>,
-                                   entry: &gimli::DebuggingInformationEntry<'abbrev, 'unit, EndianSlice<'a, gimli::LittleEndian>>,
-                                   abbrevs: &gimli::Abbreviations,
-                                   debug_str: &'a gimli::DebugStr<EndianSlice<'a, gimli::LittleEndian>>) -> Option<MaybeDemangle<'a>>
-    where 'a: 'unit {
+fn lookup_name<'abbrev, 'unit, 'a>(
+    unit: &'unit CompilationUnitHeader<EndianSlice<'a, gimli::LittleEndian>, usize>,
+    entry: &gimli::DebuggingInformationEntry<'abbrev, 'unit, EndianSlice<'a, gimli::LittleEndian>>,
+    abbrevs: &gimli::Abbreviations,
+    debug_str: &'a gimli::DebugStr<EndianSlice<'a, gimli::LittleEndian>>,
+) -> Option<MaybeDemangle<'a>>
+where
+    'a: 'unit,
+{
     let mut entry = entry.clone();
     loop {
         match entry.attr_value(gimli::DW_AT_linkage_name).unwrap() {
-            Some(gimli::AttributeValue::String(string)) => return Some(MaybeDemangle::Demangle(string.to_string_lossy())),
-            Some(gimli::AttributeValue::DebugStrRef(offset)) => return Some(MaybeDemangle::Demangle(debug_str.get_str(offset).unwrap().to_string_lossy())),
+            Some(gimli::AttributeValue::String(string)) => {
+                return Some(MaybeDemangle::Demangle(string.to_string_lossy()))
+            }
+            Some(gimli::AttributeValue::DebugStrRef(offset)) => {
+                return Some(MaybeDemangle::Demangle(
+                    debug_str.get_str(offset).unwrap().to_string_lossy(),
+                ))
+            }
             Some(_) => panic!("Invalid DW_AT_name"),
-            None => ()
+            None => (),
         }
         match entry.attr_value(gimli::DW_AT_name).unwrap() {
-            Some(gimli::AttributeValue::String(string)) => return Some(MaybeDemangle::Raw(string.to_string_lossy())),
-            Some(gimli::AttributeValue::DebugStrRef(offset)) => return Some(MaybeDemangle::Raw(debug_str.get_str(offset).unwrap().to_string_lossy())),
+            Some(gimli::AttributeValue::String(string)) => {
+                return Some(MaybeDemangle::Raw(string.to_string_lossy()))
+            }
+            Some(gimli::AttributeValue::DebugStrRef(offset)) => {
+                return Some(MaybeDemangle::Raw(
+                    debug_str.get_str(offset).unwrap().to_string_lossy(),
+                ))
+            }
             Some(_) => panic!("Invalid DW_AT_name"),
-            None => ()
+            None => (),
         }
         let reference = if let Some(r) = entry.attr_value(gimli::DW_AT_abstract_origin).unwrap() {
             r
@@ -423,8 +494,15 @@ fn lookup_name<'abbrev, 'unit, 'a>(unit: &'unit CompilationUnitHeader<EndianSlic
         };
         match reference {
             gimli::AttributeValue::UnitRef(offset) => {
-                entry = unit.entries_at_offset(abbrevs, offset).unwrap().next_dfs().unwrap().unwrap().1.clone();
-            },
+                entry = unit
+                    .entries_at_offset(abbrevs, offset)
+                    .unwrap()
+                    .next_dfs()
+                    .unwrap()
+                    .unwrap()
+                    .1
+                    .clone();
+            }
             _ => {
                 panic!("Unexpected attribute value for reference: {:?}", reference);
             }
@@ -432,7 +510,11 @@ fn lookup_name<'abbrev, 'unit, 'a>(unit: &'unit CompilationUnitHeader<EndianSlic
     }
 }
 
-fn is_allowed_expression<'a>(mut e: gimli::Evaluation<EndianSlice<'a, gimli::LittleEndian>>, no_entry_value: bool, no_parameter_ref: bool) -> bool {
+fn is_allowed_expression<'a>(
+    mut e: gimli::Evaluation<EndianSlice<'a, gimli::LittleEndian>>,
+    no_entry_value: bool,
+    no_parameter_ref: bool,
+) -> bool {
     match e.evaluate() {
         Ok(gimli::EvaluationResult::RequiresEntryValue(_)) => !no_entry_value,
         Ok(gimli::EvaluationResult::RequiresParameterRef(_)) => !no_parameter_ref,
@@ -449,11 +531,15 @@ pub fn evaluate_info<'a>(
     debug_line: &'a gimli::DebugLine<EndianSlice<'a, gimli::LittleEndian>>,
     no_entry_value: bool,
     no_parameter_ref: bool,
-    stats: &'a mut Stats
-)
-{
+    stats: &'a mut Stats,
+) {
     let units = debug_info.units().collect::<Vec<_>>().unwrap();
-    let process_unit = |stats: &Stats, unit: CompilationUnitHeader<EndianSlice<'a, gimli::LittleEndian>, usize>| -> FinalUnitStats {
+    let process_unit = |stats: &Stats,
+                        unit: CompilationUnitHeader<
+        EndianSlice<'a, gimli::LittleEndian>,
+        usize,
+    >|
+     -> FinalUnitStats {
         let mut unit_stats = stats.new_unit_stats();
         let abbrevs = unit.abbreviations(debug_abbrev).unwrap();
         let mut entries = unit.entries(&abbrevs);
@@ -464,12 +550,16 @@ pub fn evaluate_info<'a>(
         {
             let (delta, entry) = entries.next_dfs().unwrap().unwrap();
             assert_eq!(delta, 0);
-            if let Some(gimli::AttributeValue::Addr(addr)) = entry.attr_value(gimli::DW_AT_low_pc).unwrap() {
+            if let Some(gimli::AttributeValue::Addr(addr)) =
+                entry.attr_value(gimli::DW_AT_low_pc).unwrap()
+            {
                 base_address = Some(addr);
             }
             let producer = match entry.attr_value(gimli::DW_AT_producer).unwrap() {
                 Some(gimli::AttributeValue::String(string)) => string.to_string_lossy(),
-                Some(gimli::AttributeValue::DebugStrRef(offset)) => debug_str.get_str(offset).unwrap().to_string_lossy(),
+                Some(gimli::AttributeValue::DebugStrRef(offset)) => {
+                    debug_str.get_str(offset).unwrap().to_string_lossy()
+                }
                 Some(_) => panic!("Invalid DW_AT_producer"),
                 None => Cow::Borrowed(""),
             };
@@ -481,7 +571,9 @@ pub fn evaluate_info<'a>(
             if stats.opt.language.map(|l| l != language).unwrap_or(false) {
                 return unit_stats.into();
             }
-            if let Some(gimli::AttributeValue::DebugLineRef(offset)) = entry.attr_value(gimli::DW_AT_stmt_list).unwrap() {
+            if let Some(gimli::AttributeValue::DebugLineRef(offset)) =
+                entry.attr_value(gimli::DW_AT_stmt_list).unwrap()
+            {
                 line_program_offset = Some(offset);
             }
             if let Some(dir) = entry.attr(gimli::DW_AT_comp_dir).unwrap() {
@@ -491,11 +583,18 @@ pub fn evaluate_info<'a>(
                 unit_name = name.string_value(debug_str);
             }
         }
-        let unit_dir_for_output = unit_dir.map_or(Cow::Borrowed("<unknown directory>"), |n| n.to_string_lossy());
-        let unit_name_for_output = unit_name.map_or(Cow::Borrowed("<unknown unit>"), |n| n.to_string_lossy());
-        let line_program = line_program_offset.map(|offset| {
-            debug_line.program(offset, unit.address_size(), unit_dir, unit_name).unwrap()
-        }).expect("Debug info should have source line table");
+        let unit_dir_for_output = unit_dir.map_or(Cow::Borrowed("<unknown directory>"), |n| {
+            n.to_string_lossy()
+        });
+        let unit_name_for_output =
+            unit_name.map_or(Cow::Borrowed("<unknown unit>"), |n| n.to_string_lossy());
+        let line_program = line_program_offset
+            .map(|offset| {
+                debug_line
+                    .program(offset, unit.address_size(), unit_dir, unit_name)
+                    .unwrap()
+            })
+            .expect("Debug info should have source line table");
         let mut depth = 0;
         let mut scopes: Vec<(Vec<gimli::Range>, isize)> = Vec::new();
         let mut namespace_stack: Vec<(MaybeDemangle, isize, bool)> = Vec::new();
@@ -508,19 +607,39 @@ pub fn evaluate_info<'a>(
             while scopes.last().map(|v| v.1 >= depth).unwrap_or(false) {
                 scopes.pop();
             }
-            while namespace_stack.last().map(|v| v.1 >= depth).unwrap_or(false) {
+            while namespace_stack
+                .last()
+                .map(|v| v.1 >= depth)
+                .unwrap_or(false)
+            {
                 if !namespace_stack.pop().unwrap().2 {
                     unit_stats.leave_noninline_function();
                 }
             }
-            if let Some(AttributeValue::RangeListsRef(offset)) = entry.attr_value(gimli::DW_AT_ranges).unwrap() {
-                let rs = rnglists.ranges(offset, unit.version(), unit.address_size(), base_address.unwrap()).unwrap();
+            if let Some(AttributeValue::RangeListsRef(offset)) =
+                entry.attr_value(gimli::DW_AT_ranges).unwrap()
+            {
+                let rs = rnglists
+                    .ranges(
+                        offset,
+                        unit.version(),
+                        unit.address_size(),
+                        base_address.unwrap(),
+                    )
+                    .unwrap();
                 let mut bytes_ranges = rs.collect::<Vec<_>>().unwrap();
                 sort_nonoverlapping(&mut bytes_ranges);
                 scopes.push((bytes_ranges, depth));
-            } else if let Some(AttributeValue::Udata(data)) = entry.attr_value(gimli::DW_AT_high_pc).unwrap() {
-                if let Some(gimli::AttributeValue::Addr(addr)) = entry.attr_value(gimli::DW_AT_low_pc).unwrap() {
-                    let bytes_range = gimli::Range { begin: addr, end: addr + data };
+            } else if let Some(AttributeValue::Udata(data)) =
+                entry.attr_value(gimli::DW_AT_high_pc).unwrap()
+            {
+                if let Some(gimli::AttributeValue::Addr(addr)) =
+                    entry.attr_value(gimli::DW_AT_low_pc).unwrap()
+                {
+                    let bytes_range = gimli::Range {
+                        begin: addr,
+                        end: addr + data,
+                    };
                     scopes.push((vec![bytes_range], depth));
                 }
             }
@@ -529,7 +648,11 @@ pub fn evaluate_info<'a>(
                 gimli::DW_TAG_variable => VarType::Variable,
                 gimli::DW_TAG_subprogram => {
                     if let Some(name) = lookup_name(&unit, &entry, &abbrevs, debug_str) {
-                        unit_stats.enter_noninline_function(&name, &unit_dir_for_output, &unit_name_for_output);
+                        unit_stats.enter_noninline_function(
+                            &name,
+                            &unit_dir_for_output,
+                            &unit_name_for_output,
+                        );
                         namespace_stack.push((name, depth, false));
                     }
                     continue;
@@ -582,9 +705,14 @@ pub fn evaluate_info<'a>(
                 None => String::from("<unknown line>"),
             };
             // println!("Variable stats for {}", var_name.as_ref().unwrap().demangled());
-            let (var_stats, extra_var_info) = if entry.attr_value(gimli::DW_AT_const_value).unwrap().is_some() {
+            let (var_stats, extra_var_info) = if entry
+                .attr_value(gimli::DW_AT_const_value)
+                .unwrap()
+                .is_some()
+            {
                 let bytes_in_scope = ranges_instruction_bytes(ranges);
-                let (lines_in_scope, source_line_set) = ranges_source_lines(ranges, line_program.clone());
+                let (lines_in_scope, source_line_set) =
+                    ranges_source_lines(ranges, line_program.clone());
                 (
                     VariableStats {
                         instruction_bytes_in_scope: bytes_in_scope,
@@ -601,11 +729,15 @@ pub fn evaluate_info<'a>(
                 match entry.attr_value(gimli::DW_AT_location).unwrap() {
                     Some(AttributeValue::Exprloc(expr)) => {
                         let bytes_in_scope = ranges_instruction_bytes(ranges);
-                        let (lines_in_scope, source_line_set) = ranges_source_lines(ranges, line_program.clone());
-                        let (bytes_covered, lines_covered, source_line_set) = if
-                            (no_entry_value || no_parameter_ref) &&
-                            !is_allowed_expression(expr.evaluation(unit.address_size(), unit.format()), no_entry_value, no_parameter_ref)
-                        {
+                        let (lines_in_scope, source_line_set) =
+                            ranges_source_lines(ranges, line_program.clone());
+                        let (bytes_covered, lines_covered, source_line_set) = if (no_entry_value
+                            || no_parameter_ref)
+                            && !is_allowed_expression(
+                                expr.evaluation(unit.address_size(), unit.format()),
+                                no_entry_value,
+                                no_parameter_ref,
+                            ) {
                             (0, 0, BTreeSet::new())
                         } else {
                             (bytes_in_scope, lines_in_scope, source_line_set)
@@ -625,28 +757,49 @@ pub fn evaluate_info<'a>(
                     }
                     Some(AttributeValue::LocationListsRef(loc)) => {
                         let mut locations = {
-                            let iter =
-                              loclists.locations(loc, unit.version(), unit.address_size(), base_address.unwrap())
-                                  .expect("invalid location list");
+                            let iter = loclists
+                                .locations(
+                                    loc,
+                                    unit.version(),
+                                    unit.address_size(),
+                                    base_address.unwrap(),
+                                )
+                                .expect("invalid location list");
                             iter.filter_map(|e| {
-                                if (no_entry_value || no_parameter_ref) &&
-                                    !is_allowed_expression(e.data.evaluation(unit.address_size(), unit.format()), no_entry_value, no_parameter_ref) {
+                                if (no_entry_value || no_parameter_ref)
+                                    && !is_allowed_expression(
+                                        e.data.evaluation(unit.address_size(), unit.format()),
+                                        no_entry_value,
+                                        no_parameter_ref,
+                                    )
+                                {
                                     None
                                 } else {
                                     Some(e.range)
                                 }
-                            }).collect::<Vec<_>>().expect("invalid location list")
+                            })
+                            .collect::<Vec<_>>()
+                            .expect("invalid location list")
                         };
                         sort_nonoverlapping(&mut locations);
                         let covered_ranges = ranges_overlap(ranges, &locations[..]);
-                        let (source_lines_covered, source_line_set_covered) = ranges_source_lines(&covered_ranges, line_program.clone());
-                        let after_covered_ranges = ranges_from_bounds(ranges_end(&covered_ranges), ranges_end(ranges));
-                        let (_, source_line_set_after_covered) = ranges_source_lines(&after_covered_ranges, line_program.clone());
+                        let (source_lines_covered, source_line_set_covered) =
+                            ranges_source_lines(&covered_ranges, line_program.clone());
+                        let after_covered_ranges =
+                            ranges_from_bounds(ranges_end(&covered_ranges), ranges_end(ranges));
+                        let (_, source_line_set_after_covered) =
+                            ranges_source_lines(&after_covered_ranges, line_program.clone());
                         (
                             VariableStats {
                                 instruction_bytes_in_scope: ranges_instruction_bytes(ranges),
-                                instruction_bytes_covered: ranges_instruction_bytes(&covered_ranges),
-                                source_lines_in_scope: ranges_source_lines(ranges, line_program.clone()).0,
+                                instruction_bytes_covered: ranges_instruction_bytes(
+                                    &covered_ranges,
+                                ),
+                                source_lines_in_scope: ranges_source_lines(
+                                    ranges,
+                                    line_program.clone(),
+                                )
+                                .0,
                                 source_lines_covered,
                             },
                             ExtraVarInfo {
@@ -655,30 +808,45 @@ pub fn evaluate_info<'a>(
                             },
                         )
                     }
-                    None => {
-                        (
-                            VariableStats {
-                                instruction_bytes_in_scope: ranges_instruction_bytes(ranges),
-                                instruction_bytes_covered: 0,
-                                source_lines_in_scope: ranges_source_lines(ranges, line_program.clone()).0,
-                                source_lines_covered: 0,
-                            },
-                            ExtraVarInfo {
-                                source_line_set_covered: BTreeSet::new(),
-                                source_line_set_after_covered: None,
-                            },
-                        )
-                    }
-                    _ => panic!("Unknown DW_AT_location attribute at {}", to_ref_str(&unit, &entry)),
+                    None => (
+                        VariableStats {
+                            instruction_bytes_in_scope: ranges_instruction_bytes(ranges),
+                            instruction_bytes_covered: 0,
+                            source_lines_in_scope: ranges_source_lines(
+                                ranges,
+                                line_program.clone(),
+                            )
+                            .0,
+                            source_lines_covered: 0,
+                        },
+                        ExtraVarInfo {
+                            source_line_set_covered: BTreeSet::new(),
+                            source_line_set_after_covered: None,
+                        },
+                    ),
+                    _ => panic!(
+                        "Unknown DW_AT_location attribute at {}",
+                        to_ref_str(&unit, &entry)
+                    ),
                 }
             };
-            unit_stats.accumulate(var_type, &namespace_stack,
-                                  var_name, &var_decl_dir, &var_decl_file, &var_decl_line,
-                                  extra_var_info, var_stats);
+            unit_stats.accumulate(
+                var_type,
+                &namespace_stack,
+                var_name,
+                &var_decl_dir,
+                &var_decl_file,
+                &var_decl_line,
+                extra_var_info,
+                var_stats,
+            );
         }
         unit_stats.into()
     };
-    let all_stats = units.into_par_iter().map(|u| process_unit(stats, u)).collect::<Vec<_>>();
+    let all_stats = units
+        .into_par_iter()
+        .map(|u| process_unit(stats, u))
+        .collect::<Vec<_>>();
     for s in all_stats {
         stats.accumulate(s);
     }
