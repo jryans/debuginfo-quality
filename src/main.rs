@@ -444,10 +444,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                     // println!("{}", variable_description);
 
                     let mut v_stats_filtered = None;
+                    let mut source_line_set_filtered = None;
                     let mut computation_line_set = None;
                     let mut first_defined_line = None;
                     if filtering_by_regions {
-                        let mut source_line_set_filtered = v.extra.source_line_set_covered.clone();
+                        source_line_set_filtered = Some(v.extra.source_line_set_covered.clone());
                         if stats.opt.only_computation_regions {
                             let computation_line_sets_by_file = computation_line_sets_by_file.as_ref().unwrap();
                             let decl_file_path = Path::new(&v.decl_dir).join(&v.decl_file);
@@ -459,29 +460,38 @@ fn main() -> Result<(), Box<dyn Error>> {
                             };
                             computation_line_set = computation_line_sets_by_file.get(rel_decl_file_path.as_str());
                             if let Some(computation_line_set) = computation_line_set {
-                                source_line_set_filtered = source_line_set_filtered.intersection(computation_line_set).cloned().collect();
+                                source_line_set_filtered = source_line_set_filtered.map(|set| {
+                                    set.intersection(computation_line_set).cloned().collect()
+                                });
                             } else {
-                                source_line_set_filtered.clear();
+                                source_line_set_filtered.as_mut().map(|set| {
+                                    set.clear()
+                                });
                             }
                         }
                         if stats.opt.range_start_first_defined_region {
                             let first_defined_line_by_variable = first_defined_line_by_variable.as_ref().unwrap();
                             first_defined_line = first_defined_line_by_variable.get(&variable_description);
                             if let Some(first_defined_line) = first_defined_line {
-                                while source_line_set_filtered.first().unwrap_or(&u64::MAX) < first_defined_line {
-                                    source_line_set_filtered.pop_first();
-                                }
+                                source_line_set_filtered.as_mut().map(|set| {
+                                    while set.first().unwrap_or(&u64::MAX) < first_defined_line {
+                                        set.pop_first();
+                                    }
+                                });
                             } else {
-                                source_line_set_filtered.clear();
+                                source_line_set_filtered.as_mut().map(|set| {
+                                    set.clear();
+                                });
                             }
                         }
-                        v_stats_filtered = Some(source_line_set_filtered.len() as u64);
+                        v_stats_filtered = source_line_set_filtered.as_ref().map(|set| set.len() as u64);
                     }
 
                     let mut src_scope_lines = None;
+                    let mut scope_line_set = None;
                     if stats.opt.scope_regions {
                         let scope_line_sets_by_variable = scope_line_sets_by_variable.as_ref().unwrap();
-                        let mut scope_line_set = scope_line_sets_by_variable.get(&variable_description).cloned();
+                        scope_line_set = scope_line_sets_by_variable.get(&variable_description).cloned();
                         if stats.opt.only_computation_regions {
                             if let Some(computation_line_set) = computation_line_set {
                                 scope_line_set = scope_line_set.map(|set| {
@@ -502,8 +512,28 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 });
                             }
                         }
-                        src_scope_lines = Some(scope_line_set.map_or(0, |set| set.len() as u64));
+                        src_scope_lines = Some(scope_line_set.as_ref().map_or(0, |set| set.len() as u64));
                     }
+
+                    if filtering_by_regions && stats.opt.scope_regions {
+                        if let Some(scope_line_set) = scope_line_set.as_ref() {
+                            source_line_set_filtered = source_line_set_filtered.map(|set| {
+                                set.intersection(scope_line_set).cloned().collect()
+                            });
+                            v_stats_filtered = source_line_set_filtered.as_ref().map(|set| set.len() as u64);
+                        }
+                        // We could clear filtered coverage when scope lines are missing,
+                        // but presumably the NaN from N / 0 already suggests a problem.
+                    }
+
+                    // if variable_description == "" {
+                    //     println!("Variable: {}", variable_description);
+                    //     println!("Covered line set: {:?}", v.extra.source_line_set_covered);
+                    //     println!("Computation line set: {:?}", computation_line_set);
+                    //     println!("First defined line: {:?}", first_defined_line);
+                    //     println!("Scope line set: {:?}", scope_line_set);
+                    //     println!("Filtered line set: {:?}", source_line_set_filtered);
+                    // }
 
                     write_stats(&mut w, &v.stats, bv_stats, v_stats_adjustment, v_stats_filtered, src_scope_lines);
                 }
