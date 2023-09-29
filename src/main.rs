@@ -594,6 +594,18 @@ fn main() -> Result<(), Box<dyn Error>> {
                         if let Some(scope_line_set) = scope_line_set.as_ref() {
                             source_line_set_filtered = source_line_set_filtered
                                 .map(|set| set.intersection(scope_line_set).cloned().collect());
+
+                            // If knowledge extension is enabled, look for any trailing lines in
+                            // the scope line set that can be added.
+                            if stats.opt.extend_from_baseline {
+                                let last_covered_line =
+                                    source_line_set_filtered.as_ref().and_then(|set| set.last());
+                                if let Some(last_covered_line) = last_covered_line {
+                                    let mut after_covered = scope_line_set.range((last_covered_line + 1)..).cloned().collect();
+                                    source_line_set_filtered.as_mut().map(|set| set.append(&mut after_covered));
+                                }
+                            }
+
                             v_stats_filtered = source_line_set_filtered
                                 .as_ref()
                                 .map(|set| set.len() as u64);
