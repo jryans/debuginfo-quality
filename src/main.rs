@@ -4,12 +4,12 @@ use std::error::Error;
 use std::fs;
 use std::io::{self, BufRead, BufWriter, Write};
 use std::iter::Iterator;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process;
 
 use debuginfo_quality::*;
 use object::{Object, ObjectSection};
-use relative_path::{PathExt, RelativePathBuf};
+use path_absolutize::Absolutize;
 use structopt::StructOpt;
 use typed_arena::Arena;
 
@@ -183,7 +183,14 @@ fn computation_line_sets_by_file(regions: &Vec<Region>) -> HashMap<String, BTree
         }
 
         let file = region.start.file.clone();
-        let line_set: &mut BTreeSet<u64> = line_sets_by_file.entry(file).or_default();
+        // Normalise on insert and access to allow for relative paths
+        let canonical_file = Path::new(&file)
+            .absolutize()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let line_set: &mut BTreeSet<u64> = line_sets_by_file.entry(canonical_file).or_default();
         for line in region.start.line..=region.end.line {
             line_set.insert(line);
         }
@@ -493,18 +500,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                     for inline in &v.inlines {
                         variable_description.push_str(format!(", {}", inline).as_str());
                     }
-                    // Remove file extension to avoid `.i` vs. `.c` match failures
-                    let extensionless_unit =
-                        PathBuf::from(&function_stats.unit_name).with_extension("");
+                    // Source analysis can't produce a consistent unit name
+                    // Rely on absolute file paths below to distinguish similarly named files
+                    // in different parts of a codebase
+                    // TODO: Needs to contain absolute decl file path...?
                     variable_description.push_str(
-                        format!(
-                            ", {}, decl {}:{}, unit {}",
-                            &v.name,
-                            &v.decl_file,
-                            &v.decl_line,
-                            extensionless_unit.to_str().unwrap()
-                        )
-                        .as_str(),
+                        format!(", {}, decl {}:{}", &v.name, &v.decl_file, &v.decl_line,).as_str(),
                     );
                     // println!("{}", variable_description);
 
@@ -517,17 +518,24 @@ fn main() -> Result<(), Box<dyn Error>> {
                         if stats.opt.only_computation_regions {
                             let computation_line_sets_by_file =
                                 computation_line_sets_by_file.as_ref().unwrap();
-                            let decl_file_path = Path::new(&v.decl_dir).join(&v.decl_file);
-                            // Some decl file paths are relative while others are absolute
-                            let rel_decl_file_path = if decl_file_path.is_absolute() {
-                                decl_file_path
-                                    .relative_to(&function_stats.unit_dir)
-                                    .unwrap()
+                            // Some paths are already absolute, others are relative to compilation
+                            let mut decl_file_path = if Path::new(&v.decl_dir).is_absolute() {
+                                Path::new(&v.decl_dir).join(&v.decl_file)
                             } else {
-                                RelativePathBuf::from_path(decl_file_path).unwrap()
+                                Path::new(&function_stats.unit_dir)
+                                    .join(&v.decl_dir)
+                                    .join(&v.decl_file)
                             };
+                            // Normalise on insert and access to allow for relative paths
+                            decl_file_path = decl_file_path.absolutize().unwrap().to_path_buf();
+                            // if variable_description == "" {
+                            //     println!("Unit dir: {}", function_stats.unit_dir);
+                            //     println!("Decl dir: {}", v.decl_dir);
+                            //     println!("Decl file: {}", v.decl_file);
+                            //     println!("Decl file path: {}", decl_file_path.to_str().unwrap());
+                            // }
                             computation_line_set =
-                                computation_line_sets_by_file.get(rel_decl_file_path.as_str());
+                                computation_line_sets_by_file.get(decl_file_path.to_str().unwrap());
                             if let Some(computation_line_set) = computation_line_set {
                                 source_line_set_filtered = source_line_set_filtered.map(|set| {
                                     set.intersection(computation_line_set).cloned().collect()
@@ -572,6 +580,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                                     set.intersection(computation_line_set).cloned().collect()
                                 });
                             }
+                            // TODO: Clear source line set when computation missing
                         }
                         if stats.opt.range_start_first_defined_region {
                             if let Some(first_defined_line) = first_defined_line {
