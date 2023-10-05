@@ -601,8 +601,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 let last_covered_line =
                                     source_line_set_filtered.as_ref().and_then(|set| set.last());
                                 if let Some(last_covered_line) = last_covered_line {
-                                    let mut after_covered = scope_line_set.range((last_covered_line + 1)..).cloned().collect();
-                                    source_line_set_filtered.as_mut().map(|set| set.append(&mut after_covered));
+                                    let mut after_covered = scope_line_set
+                                        .range((last_covered_line + 1)..)
+                                        .cloned()
+                                        .collect();
+                                    source_line_set_filtered
+                                        .as_mut()
+                                        .map(|set| set.append(&mut after_covered));
                                 }
                             }
 
