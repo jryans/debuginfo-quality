@@ -579,8 +579,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 scope_line_set = scope_line_set.map(|set| {
                                     set.intersection(computation_line_set).cloned().collect()
                                 });
+                            } else {
+                                scope_line_set.as_mut().map(|set| {
+                                    set.clear();
+                                });
                             }
-                            // TODO: Clear source line set when computation missing
                         }
                         if stats.opt.range_start_first_defined_region {
                             if let Some(first_defined_line) = first_defined_line {
