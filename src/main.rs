@@ -357,7 +357,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     if !stats.opt.tsv && (stats.opt.functions || stats.opt.variables) {
         write!(&mut w, "\t\t\t\t")?;
     }
-    write!(&mut w, "Name")?;
+    write!(&mut w, "Name\tInl Ancs")?;
     let adjusting_by_baseline = stats.opt.range_start_baseline || stats.opt.extend_from_baseline;
     let filtering_by_regions =
         stats.opt.only_computation_regions || stats.opt.range_start_first_defined_region;
@@ -432,16 +432,27 @@ fn main() -> Result<(), Box<dyn Error>> {
                         }
                     });
 
-                    write!(&mut w, "{}", &function_stats.name)?;
-                    for inline in &v.inlines {
-                        write!(&mut w, ", {}", inline)?;
-                    }
+                    // Separate any inline ancestors from the leaf function that contains the
+                    // variable at the source level
+                    let (inline_ancestors, leaf_function_name) = {
+                        let mut names = vec![function_stats.name.clone()];
+                        names.append(&mut v.inlines.clone());
+                        let leaf = names.pop().unwrap();
+                        (names, leaf)
+                    };
+
                     write!(
                         &mut w,
-                        ", {}, decl {}:{}, unit {}",
-                        &v.name, &v.decl_file, &v.decl_line, &function_stats.unit_name
+                        "{}, {}, decl {}:{}, unit {}\t{}",
+                        &leaf_function_name,
+                        &v.name,
+                        &v.decl_file,
+                        &v.decl_line,
+                        &function_stats.unit_name,
+                        inline_ancestors.join(", "),
                     )?;
 
+                    // TODO: Handle inlining in old metric or remove
                     let mut v_stats_adjustment = None;
                     if adjusting_by_baseline {
                         if let Some(bv) = base_v {
@@ -496,10 +507,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                         base_v.map(|bv| &bv.stats)
                     };
 
-                    let mut variable_description = function_stats.name.clone();
-                    for inline in &v.inlines {
-                        variable_description.push_str(format!(", {}", inline).as_str());
-                    }
+                    // Matching with source analysis uses the function containing the variable
+                    // Without inlining, there's only one function, so the answer is clear.
+                    // With inlining, we want the leaf function name at the end of the inlines.
+                    let mut variable_description = leaf_function_name;
                     // Source analysis can't produce a consistent unit name
                     // Rely on absolute file paths below to distinguish similarly named files
                     // in different parts of a codebase
