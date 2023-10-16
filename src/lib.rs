@@ -450,40 +450,25 @@ impl<'a> MaybeDemangle<'a> {
     }
 }
 
-fn lookup_name<'abbrev, 'unit, 'a>(
+fn lookup_multiple<'abbrev, 'unit, 'a>(
     unit: &'unit CompilationUnitHeader<EndianSlice<'a, gimli::LittleEndian>, usize>,
     entry: &gimli::DebuggingInformationEntry<'abbrev, 'unit, EndianSlice<'a, gimli::LittleEndian>>,
     abbrevs: &gimli::Abbreviations,
-    debug_str: &'a gimli::DebugStr<EndianSlice<'a, gimli::LittleEndian>>,
-) -> Option<MaybeDemangle<'a>>
+    attrs: &[gimli::DwAt],
+) -> Option<(
+    gimli::DwAt,
+    AttributeValue<EndianSlice<'a, gimli::LittleEndian>>,
+)>
 where
     'a: 'unit,
 {
     let mut entry = entry.clone();
     loop {
-        match entry.attr_value(gimli::DW_AT_linkage_name).unwrap() {
-            Some(gimli::AttributeValue::String(string)) => {
-                return Some(MaybeDemangle::Demangle(string.to_string_lossy()))
+        for attr in attrs {
+            let value = entry.attr_value(*attr).unwrap();
+            if let Some(value) = value {
+                return Some((*attr, value));
             }
-            Some(gimli::AttributeValue::DebugStrRef(offset)) => {
-                return Some(MaybeDemangle::Demangle(
-                    debug_str.get_str(offset).unwrap().to_string_lossy(),
-                ))
-            }
-            Some(_) => panic!("Invalid DW_AT_name"),
-            None => (),
-        }
-        match entry.attr_value(gimli::DW_AT_name).unwrap() {
-            Some(gimli::AttributeValue::String(string)) => {
-                return Some(MaybeDemangle::Raw(string.to_string_lossy()))
-            }
-            Some(gimli::AttributeValue::DebugStrRef(offset)) => {
-                return Some(MaybeDemangle::Raw(
-                    debug_str.get_str(offset).unwrap().to_string_lossy(),
-                ))
-            }
-            Some(_) => panic!("Invalid DW_AT_name"),
-            None => (),
         }
         let reference = if let Some(r) = entry.attr_value(gimli::DW_AT_abstract_origin).unwrap() {
             r
@@ -507,6 +492,51 @@ where
                 panic!("Unexpected attribute value for reference: {:?}", reference);
             }
         }
+    }
+}
+
+fn lookup<'abbrev, 'unit, 'a>(
+    unit: &'unit CompilationUnitHeader<EndianSlice<'a, gimli::LittleEndian>, usize>,
+    entry: &gimli::DebuggingInformationEntry<'abbrev, 'unit, EndianSlice<'a, gimli::LittleEndian>>,
+    abbrevs: &gimli::Abbreviations,
+    attr: gimli::DwAt,
+) -> Option<AttributeValue<EndianSlice<'a, gimli::LittleEndian>>>
+where
+    'a: 'unit,
+{
+    lookup_multiple(unit, entry, abbrevs, &[attr]).map(|av| av.1)
+}
+
+fn lookup_name<'abbrev, 'unit, 'a>(
+    unit: &'unit CompilationUnitHeader<EndianSlice<'a, gimli::LittleEndian>, usize>,
+    entry: &gimli::DebuggingInformationEntry<'abbrev, 'unit, EndianSlice<'a, gimli::LittleEndian>>,
+    abbrevs: &gimli::Abbreviations,
+    debug_str: &'a gimli::DebugStr<EndianSlice<'a, gimli::LittleEndian>>,
+) -> Option<MaybeDemangle<'a>>
+where
+    'a: 'unit,
+{
+    let result = lookup_multiple(
+        unit,
+        entry,
+        abbrevs,
+        &[gimli::DW_AT_linkage_name, gimli::DW_AT_name],
+    );
+    match result {
+        Some((gimli::DW_AT_linkage_name, gimli::AttributeValue::String(string))) => {
+            Some(MaybeDemangle::Demangle(string.to_string_lossy()))
+        }
+        Some((gimli::DW_AT_linkage_name, gimli::AttributeValue::DebugStrRef(offset))) => Some(
+            MaybeDemangle::Demangle(debug_str.get_str(offset).unwrap().to_string_lossy()),
+        ),
+        Some((gimli::DW_AT_name, gimli::AttributeValue::String(string))) => {
+            Some(MaybeDemangle::Raw(string.to_string_lossy()))
+        }
+        Some((gimli::DW_AT_name, gimli::AttributeValue::DebugStrRef(offset))) => Some(
+            MaybeDemangle::Raw(debug_str.get_str(offset).unwrap().to_string_lossy()),
+        ),
+        Some(_) => panic!("Invalid DW_AT_name"),
+        None => None,
     }
 }
 
@@ -678,18 +708,20 @@ pub fn evaluate_info<'a>(
                 continue;
             };
             let var_name = lookup_name(&unit, &entry, &abbrevs, debug_str);
-            let var_decl_dir = match entry.attr_value(gimli::DW_AT_decl_file).unwrap() {
-                Some(gimli::AttributeValue::FileIndex(file)) => line_program
-                    .header()
-                    .file(file)
-                    .unwrap()
-                    .directory(line_program.header())
-                    .unwrap()
-                    .to_string_lossy(),
+            let var_decl_dir = match lookup(&unit, &entry, &abbrevs, gimli::DW_AT_decl_file) {
+                Some(gimli::AttributeValue::FileIndex(file)) => {
+                    line_program
+                        .header()
+                        .file(file)
+                        .unwrap()
+                        .directory(line_program.header())
+                        .unwrap()
+                        .to_string_lossy()
+                }
                 Some(_) => panic!("Invalid DW_AT_decl_file"),
                 None => Cow::Borrowed("<unknown directory>"),
             };
-            let var_decl_file = match entry.attr_value(gimli::DW_AT_decl_file).unwrap() {
+            let var_decl_file = match lookup(&unit, &entry, &abbrevs, gimli::DW_AT_decl_file) {
                 Some(gimli::AttributeValue::FileIndex(file)) => line_program
                     .header()
                     .file(file)
@@ -699,7 +731,7 @@ pub fn evaluate_info<'a>(
                 Some(_) => panic!("Invalid DW_AT_decl_file"),
                 None => Cow::Borrowed("<unknown file>"),
             };
-            let var_decl_line = match entry.attr_value(gimli::DW_AT_decl_line).unwrap() {
+            let var_decl_line = match lookup(&unit, &entry, &abbrevs, gimli::DW_AT_decl_line) {
                 Some(gimli::AttributeValue::Udata(line)) => line.to_string(),
                 Some(_) => panic!("Invalid DW_AT_decl_line"),
                 None => String::from("<unknown line>"),
