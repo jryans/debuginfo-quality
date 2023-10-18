@@ -539,7 +539,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                             };
                             // Normalise on insert and access to allow for relative paths
                             decl_file_path = decl_file_path.absolutize().unwrap().to_path_buf();
-                            // if variable_description == "" {
+                            // if variable_description.starts_with("") {
                             //     println!("Unit dir: {}", function_stats.unit_dir);
                             //     println!("Decl dir: {}", v.decl_dir);
                             //     println!("Decl file: {}", v.decl_file);
@@ -642,7 +642,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         // but presumably the NaN from N / 0 already suggests a problem.
                     }
 
-                    // if variable_description == "" {
+                    // if variable_description.starts_with("") {
                     //     println!("Variable: {}", variable_description);
                     //     println!("Covered line set: {:?}", v.extra.source_line_set_covered);
                     //     println!("Computation line set: {:?}", computation_line_set);
