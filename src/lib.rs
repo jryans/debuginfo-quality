@@ -709,15 +709,13 @@ pub fn evaluate_info<'a>(
             };
             let var_name = lookup_name(&unit, &entry, &abbrevs, debug_str);
             let var_decl_dir = match lookup(&unit, &entry, &abbrevs, gimli::DW_AT_decl_file) {
-                Some(gimli::AttributeValue::FileIndex(file)) => {
-                    line_program
-                        .header()
-                        .file(file)
-                        .unwrap()
-                        .directory(line_program.header())
-                        .unwrap()
-                        .to_string_lossy()
-                }
+                Some(gimli::AttributeValue::FileIndex(file)) => line_program
+                    .header()
+                    .file(file)
+                    .unwrap()
+                    .directory(line_program.header())
+                    .unwrap()
+                    .to_string_lossy(),
                 Some(_) => panic!("Invalid DW_AT_decl_file"),
                 None => Cow::Borrowed("<unknown directory>"),
             };
