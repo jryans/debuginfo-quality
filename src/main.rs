@@ -357,7 +357,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     if !stats.opt.tsv && (stats.opt.functions || stats.opt.variables) {
         write!(&mut w, "\t\t\t\t")?;
     }
-    write!(&mut w, "Name\tInl Ancs")?;
+    write!(&mut w, "Name\tInstance")?;
     let adjusting_by_baseline = stats.opt.range_start_baseline || stats.opt.extend_from_baseline;
     let filtering_by_regions =
         stats.opt.only_computation_regions || stats.opt.range_start_first_defined_region;
@@ -434,22 +434,35 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                     // Separate any inline ancestors from the leaf function that contains the
                     // variable at the source level
-                    let (inline_ancestors, leaf_function_name) = {
+                    let (mut inline_ancestors, leaf_function_name) = {
                         let mut names = vec![function_stats.name.clone()];
                         names.append(&mut v.inlines.clone());
                         let leaf = names.pop().unwrap();
                         (names, leaf)
                     };
 
+                    // Matching with source analysis uses the function containing the variable
+                    // Without inlining, there's only one function, so the answer is clear.
+                    // With inlining, we want the leaf function name at the end of the inlines.
+                    let mut variable_description = leaf_function_name;
+                    // Source analysis can't produce a consistent unit name
+                    // Rely on absolute file paths below to distinguish similarly named files
+                    // in different parts of a codebase
+                    // TODO: Needs to contain absolute decl file path...?
+                    variable_description.push_str(
+                        format!(", {}, decl {}:{}", &v.name, &v.decl_file, &v.decl_line,).as_str(),
+                    );
+                    // println!("{}", variable_description);
+
+                    // Add unit name alongside inline ancestors to distinguish per-unit instances
+                    let mut instance_segments = vec![function_stats.unit_name.clone()];
+                    instance_segments.append(&mut inline_ancestors);
+
                     write!(
                         &mut w,
-                        "{}, {}, decl {}:{}, unit {}\t{}",
-                        &leaf_function_name,
-                        &v.name,
-                        &v.decl_file,
-                        &v.decl_line,
-                        &function_stats.unit_name,
-                        inline_ancestors.join(", "),
+                        "{}\t{}",
+                        &variable_description,
+                        instance_segments.join(", "),
                     )?;
 
                     // TODO: Handle inlining in old metric or remove
@@ -506,19 +519,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                     } else {
                         base_v.map(|bv| &bv.stats)
                     };
-
-                    // Matching with source analysis uses the function containing the variable
-                    // Without inlining, there's only one function, so the answer is clear.
-                    // With inlining, we want the leaf function name at the end of the inlines.
-                    let mut variable_description = leaf_function_name;
-                    // Source analysis can't produce a consistent unit name
-                    // Rely on absolute file paths below to distinguish similarly named files
-                    // in different parts of a codebase
-                    // TODO: Needs to contain absolute decl file path...?
-                    variable_description.push_str(
-                        format!(", {}, decl {}:{}", &v.name, &v.decl_file, &v.decl_line,).as_str(),
-                    );
-                    // println!("{}", variable_description);
 
                     let mut v_stats_filtered = None;
                     let mut source_line_set_filtered = None;
