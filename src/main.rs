@@ -466,7 +466,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     )?;
 
                     // TODO: Handle inlining in old metric or remove
-                    let mut v_stats_adjustment = None;
+                    let mut v_stats_adjusted = None;
                     if adjusting_by_baseline {
                         if let Some(bv) = base_v {
                             let mut source_line_set_adjusted =
@@ -507,9 +507,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                                     // }
                                 }
                             }
-                            v_stats_adjustment = Some(source_line_set_adjusted.len() as u64);
+                            v_stats_adjusted = Some(source_line_set_adjusted.len() as u64);
                         } else {
-                            v_stats_adjustment = Some(0);
+                            v_stats_adjusted = Some(0);
                         }
                     }
 
@@ -655,7 +655,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         &mut w,
                         &v.stats,
                         bv_stats,
-                        v_stats_adjustment,
+                        v_stats_adjusted,
                         v_stats_filtered,
                         src_scope_lines,
                     );
