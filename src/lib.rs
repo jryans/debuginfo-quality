@@ -198,6 +198,7 @@ impl<'a> UnitStats<'a> {
         unit_name: &str,
     ) {
         let demangled = name.demangled();
+        // println!("Entering function: {}", &demangled);
         self.noninline_function_stack.push(
             if self
                 .opt
@@ -256,6 +257,14 @@ impl<'a> UnitStats<'a> {
             VarType::Variable => self.bundle.variables += stats.clone(),
         }
         if self.opt.variables || self.opt.lines {
+            // println!(
+            //     "Adding variable {} to {}",
+            //     var_name
+            //         .as_ref()
+            //         .map(|d| d.demangled())
+            //         .unwrap_or(Cow::Borrowed("<anon>")),
+            //     &function_stats.name,
+            // );
             function_stats.variables.push(NamedVarStats {
                 inlines: subprogram_name_stack[i..]
                     .iter()
@@ -275,6 +284,7 @@ impl<'a> UnitStats<'a> {
     }
     fn leave_noninline_function(&mut self) {
         if let Some(function_stats) = self.noninline_function_stack.pop().unwrap() {
+            // println!("Leaving function: {}, {:?}", &function_stats.name, &function_stats.stats);
             if function_stats.stats.instruction_bytes_in_scope > 0
                 && (self.opt.functions || self.opt.variables || self.opt.lines)
             {
@@ -419,6 +429,7 @@ where
     format!("{:x}:{:x}", unit.offset().0, entry.offset().0)
 }
 
+#[derive(Debug)]
 enum MaybeDemangle<'a> {
     Demangle(Cow<'a, str>),
     Raw(Cow<'a, str>),
@@ -621,9 +632,10 @@ pub fn evaluate_info<'a>(
         let mut scopes: Vec<(Vec<gimli::Range>, isize)> = Vec::new();
         let mut namespace_stack: Vec<(MaybeDemangle, isize, bool)> = Vec::new();
         loop {
-            let (delta, entry) = match entries.next_dfs().unwrap() {
-                None => break,
-                Some(entry) => entry,
+            let next = entries.next_dfs().unwrap();
+            let delta = match next {
+                None => -depth,
+                Some(next) => next.0,
             };
             depth += delta;
             while scopes.last().map(|v| v.1 >= depth).unwrap_or(false) {
@@ -638,6 +650,10 @@ pub fn evaluate_info<'a>(
                     unit_stats.leave_noninline_function();
                 }
             }
+            let entry = match next {
+                None => break,
+                Some(next) => next.1,
+            };
             if let Some(AttributeValue::RangeListsRef(offset)) =
                 entry.attr_value(gimli::DW_AT_ranges).unwrap()
             {
