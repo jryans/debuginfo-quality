@@ -748,32 +748,33 @@ fn main() -> Result<(), Box<dyn Error>> {
                 );
             }
         }
-        writeln!(&mut w)?;
-    }
 
-    if stats.opt.lines {
-        let mut locatable_vars_per_line = locatable_vars_per_line.unwrap();
-        let mut scope_vars_per_line = scope_vars_per_line.unwrap();
+        if stats.opt.lines {
+            let mut locatable_vars_per_line = locatable_vars_per_line.unwrap();
+            let mut scope_vars_per_line = scope_vars_per_line.unwrap();
 
-        // Resize all arrays to same length
-        let lines = locatable_vars_per_line.len().max(scope_vars_per_line.len());
-        locatable_vars_per_line.resize_with(lines, Default::default);
-        scope_vars_per_line.resize_with(lines, Default::default);
+            // Resize all arrays to same length
+            let lines = locatable_vars_per_line.len().max(scope_vars_per_line.len());
+            locatable_vars_per_line.resize_with(lines, Default::default);
+            scope_vars_per_line.resize_with(lines, Default::default);
 
-        for line in 0..lines {
-            let locatable_vars = &locatable_vars_per_line[line];
-            let scope_vars = &scope_vars_per_line[line];
-            writeln!(
-                &mut w,
-                "{:12}\t{}\t{}",
-                // "{:12}\t{}: {:?}\t{}: {:?}",
-                line + 1,
-                locatable_vars.len(),
-                // locatable_vars,
-                scope_vars.len(),
-                // scope_vars,
-            )?;
+            for line in 0..lines {
+                let locatable_vars = &locatable_vars_per_line[line];
+                let scope_vars = &scope_vars_per_line[line];
+                writeln!(
+                    &mut w,
+                    "{:12}\t{}\t{}",
+                    // "{:12}\t{}: {:?}\t{}: {:?}",
+                    line + 1,
+                    locatable_vars.len(),
+                    // locatable_vars,
+                    scope_vars.len(),
+                    // scope_vars,
+                )?;
+            }
         }
+
+        writeln!(&mut w)?;
     }
 
     if adjusting_by_baseline {
