@@ -741,14 +741,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             let locatable_vars_by_line = locatable_vars_by_line.unwrap();
             let scope_vars_by_line = scope_vars_by_line.unwrap();
 
-            // Union line sets to find all lines
-            let mut lines = BTreeSet::new();
-            lines.append(&mut locatable_vars_by_line.keys().cloned().collect());
-            lines.append(&mut scope_vars_by_line.keys().cloned().collect());
-
-            for line in lines {
-                let locatable_vars = locatable_vars_by_line.get(&line);
-                let scope_vars = scope_vars_by_line.get(&line);
+            // Lines must be part of scope set to count, so use this to iterate the other sets
+            for line in scope_vars_by_line.keys() {
+                let locatable_vars = locatable_vars_by_line.get(line);
+                let scope_vars = scope_vars_by_line.get(line);
                 writeln!(
                     &mut w,
                     "{:12}\t{}\t{}",
