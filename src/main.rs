@@ -690,7 +690,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         locatable_vars_per_line.resize_with(
                             locatable_vars_per_line
                                 .len()
-                                .max(*covered_line_set.last().unwrap() as usize),
+                                .max(*covered_line_set.last().unwrap_or(&0) as usize),
                             Default::default,
                         );
                         for line in covered_line_set {
@@ -703,7 +703,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         scope_vars_per_line.resize_with(
                             scope_vars_per_line
                                 .len()
-                                .max(*scope_line_set.last().unwrap() as usize),
+                                .max(*scope_line_set.last().unwrap_or(&0) as usize),
                             Default::default,
                         );
                         for line in scope_line_set {
