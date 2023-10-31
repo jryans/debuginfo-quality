@@ -1,5 +1,5 @@
 use std::borrow::{Borrow, Cow};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::error::Error;
 use std::fs;
 use std::io::{self, BufRead, BufWriter, Write};
@@ -350,50 +350,73 @@ fn main() -> Result<(), Box<dyn Error>> {
         .as_ref()
         .map(|r| scope_line_sets_by_variable(r.as_ref().unwrap()));
 
+    let adjusting_by_baseline = stats.opt.range_start_baseline || stats.opt.extend_from_baseline;
+    let filtering_by_regions =
+        stats.opt.only_computation_regions || stats.opt.range_start_first_defined_region;
+
+    // Lines mode currently assumes debug info only knows about a single file
+    let mut lines_src_file = None;
+    let mut locatable_vars_per_line: Option<Vec<HashSet<String>>> = None;
+    let mut scope_vars_per_line: Option<Vec<HashSet<String>>> = None;
+    if stats.opt.lines {
+        locatable_vars_per_line = Some(Vec::new());
+        scope_vars_per_line = Some(Vec::new());
+    }
+
     let stdout = io::stdout();
     let mut stdout_locked = stdout.lock();
     let mut w = BufWriter::new(&mut stdout_locked);
 
-    if !stats.opt.tsv && (stats.opt.functions || stats.opt.variables) {
-        write!(&mut w, "\t\t\t\t")?;
-    }
-    write!(&mut w, "Name\tInstance")?;
-    let adjusting_by_baseline = stats.opt.range_start_baseline || stats.opt.extend_from_baseline;
-    let filtering_by_regions =
-        stats.opt.only_computation_regions || stats.opt.range_start_first_defined_region;
-    if base_stats.is_some() && !adjusting_by_baseline {
+    // TODO: In need of reorganisation, perhaps with functions for each report step
+    // Too many conditionals for all the possible combinations of options
+
+    if stats.opt.lines {
+        // Line mode
         writeln!(
             &mut w,
-            "\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}",
-            "Cov (B)",
-            "Scope (B)",
-            "BaseCov (B)",
-            "BaseScope (B)",
-            "Cov (L)",
-            "Scope (L)",
-            "BaseCov (L)",
-            "BaseScope (L)"
+            "{:12}\t{:12}\t{:12}",
+            "Line", "Locatable (V)", "Scope (V)"
         )?;
     } else {
-        write!(
-            &mut w,
-            "\t{:12}\t{:12}\t{:12}\t{:12}",
-            "Cov (B)", "Scope (B)", "Cov (L)", "Scope (L)"
-        )?;
-        if adjusting_by_baseline {
-            write!(&mut w, "\t{:12}", "Adj Cov (L)")?;
+        // Function / variable modes
+        if !stats.opt.tsv && (stats.opt.functions || stats.opt.variables) {
+            write!(&mut w, "\t\t\t\t")?;
         }
-        if filtering_by_regions {
-            write!(&mut w, "\t{:12}", "Flt Cov (L)")?;
+        write!(&mut w, "Name\tInstance")?;
+        if base_stats.is_some() && !adjusting_by_baseline {
+            writeln!(
+                &mut w,
+                "\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}\t{:12}",
+                "Cov (B)",
+                "Scope (B)",
+                "BaseCov (B)",
+                "BaseScope (B)",
+                "Cov (L)",
+                "Scope (L)",
+                "BaseCov (L)",
+                "BaseScope (L)"
+            )?;
+        } else {
+            write!(
+                &mut w,
+                "\t{:12}\t{:12}\t{:12}\t{:12}",
+                "Cov (B)", "Scope (B)", "Cov (L)", "Scope (L)"
+            )?;
+            if adjusting_by_baseline {
+                write!(&mut w, "\t{:12}", "Adj Cov (L)")?;
+            }
+            if filtering_by_regions {
+                write!(&mut w, "\t{:12}", "Flt Cov (L)")?;
+            }
+            if stats.opt.scope_regions {
+                write!(&mut w, "\t{:12}", "Src Scope (L)")?;
+            }
+            writeln!(&mut w)?;
         }
-        if stats.opt.scope_regions {
-            write!(&mut w, "\t{:12}", "Src Scope (L)")?;
-        }
-        writeln!(&mut w)?;
     }
     writeln!(&mut w)?;
 
-    if stats.opt.functions || stats.opt.variables {
+    if stats.opt.functions || stats.opt.variables || stats.opt.lines {
         let mut functions: Vec<(FunctionStats, Option<&FunctionStats>)> =
             if let Some(base) = base_stats.as_ref() {
                 let mut base_functions = HashMap::new();
@@ -413,11 +436,25 @@ fn main() -> Result<(), Box<dyn Error>> {
             } else {
                 stats.output.into_iter().map(|o| (o, None)).collect()
             };
+
         functions.sort_by(|a, b| goodness(a).partial_cmp(&goodness(b)).unwrap());
+
         for (function_stats, base_function_stats) in functions {
-            if stats.opt.variables {
+            if stats.opt.variables || stats.opt.lines {
                 let unit_name = function_stats.unit_name.clone();
                 for v in function_stats.variables {
+                    // Check declaration file in lines mode
+                    if stats.opt.lines {
+                        if let Some(ref lines_src_file) = lines_src_file {
+                            assert!(
+                                *lines_src_file == v.decl_file,
+                                "Lines mode currently assumes a single source file"
+                            );
+                        } else {
+                            lines_src_file = Some(v.decl_file.clone());
+                        }
+                    }
+
                     let base_v = base_function_stats.and_then(|bf| {
                         let mut same_v = bf.variables.iter().filter(|&bv| {
                             bv.name == v.name
@@ -458,12 +495,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let mut instance_segments = vec![function_stats.unit_name.clone()];
                     instance_segments.append(&mut inline_ancestors);
 
-                    write!(
-                        &mut w,
-                        "{}\t{}",
-                        &variable_description,
-                        instance_segments.join(", "),
-                    )?;
+                    if stats.opt.variables {
+                        write!(
+                            &mut w,
+                            "{}\t{}",
+                            &variable_description,
+                            instance_segments.join(", "),
+                        )?;
+                    }
 
                     // TODO: Handle inlining in old metric or remove
                     let mut v_stats_adjusted = None;
@@ -642,6 +681,37 @@ fn main() -> Result<(), Box<dyn Error>> {
                         // but presumably the NaN from N / 0 already suggests a problem.
                     }
 
+                    if let Some(ref mut locatable_vars_per_line) = locatable_vars_per_line {
+                        // Use filtered set if it exists, otherwise fallback to basic coverage
+                        let covered_line_set = source_line_set_filtered
+                            .as_ref()
+                            .unwrap_or(&v.extra.source_line_set_covered);
+                        // Ensure there are slots for all of this variable's lines
+                        locatable_vars_per_line.resize_with(
+                            locatable_vars_per_line
+                                .len()
+                                .max(*covered_line_set.last().unwrap() as usize),
+                            Default::default,
+                        );
+                        for line in covered_line_set {
+                            let locatable_vars = &mut locatable_vars_per_line[(line - 1) as usize];
+                            locatable_vars.insert(variable_description.clone());
+                        }
+                    }
+                    if let Some(ref mut scope_vars_per_line) = scope_vars_per_line {
+                        let scope_line_set = scope_line_set.as_ref().unwrap();
+                        scope_vars_per_line.resize_with(
+                            scope_vars_per_line
+                                .len()
+                                .max(*scope_line_set.last().unwrap() as usize),
+                            Default::default,
+                        );
+                        for line in scope_line_set {
+                            let scope_vars = &mut scope_vars_per_line[(line - 1) as usize];
+                            scope_vars.insert(variable_description.clone());
+                        }
+                    }
+
                     // if variable_description.starts_with("") {
                     //     println!("Variable: {}", variable_description);
                     //     println!("Covered line set: {:?}", v.extra.source_line_set_covered);
@@ -651,14 +721,16 @@ fn main() -> Result<(), Box<dyn Error>> {
                     //     println!("Filtered line set: {:?}", source_line_set_filtered);
                     // }
 
-                    write_stats(
-                        &mut w,
-                        &v.stats,
-                        bv_stats,
-                        v_stats_adjusted,
-                        v_stats_filtered,
-                        src_scope_lines,
-                    );
+                    if stats.opt.variables {
+                        write_stats(
+                            &mut w,
+                            &v.stats,
+                            bv_stats,
+                            v_stats_adjusted,
+                            v_stats_filtered,
+                            src_scope_lines,
+                        );
+                    }
                 }
             } else {
                 write!(
@@ -677,6 +749,31 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
         writeln!(&mut w)?;
+    }
+
+    if stats.opt.lines {
+        let mut locatable_vars_per_line = locatable_vars_per_line.unwrap();
+        let mut scope_vars_per_line = scope_vars_per_line.unwrap();
+
+        // Resize all arrays to same length
+        let lines = locatable_vars_per_line.len().max(scope_vars_per_line.len());
+        locatable_vars_per_line.resize_with(lines, Default::default);
+        scope_vars_per_line.resize_with(lines, Default::default);
+
+        for line in 0..lines {
+            let locatable_vars = &locatable_vars_per_line[line];
+            let scope_vars = &scope_vars_per_line[line];
+            writeln!(
+                &mut w,
+                "{:12}\t{}\t{}",
+                // "{:12}\t{}: {:?}\t{}: {:?}",
+                line + 1,
+                locatable_vars.len(),
+                // locatable_vars,
+                scope_vars.len(),
+                // scope_vars,
+            )?;
+        }
     }
 
     if adjusting_by_baseline {

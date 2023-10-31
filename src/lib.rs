@@ -45,6 +45,9 @@ pub struct Opt {
     /// Show results for each variable. Print the worst functions first.
     #[structopt(short = "v", long = "variables")]
     pub variables: bool,
+    /// Show results for each line. Assumes compilation has only one source file.
+    #[structopt(long = "lines")]
+    pub lines: bool,
     /// Treat locations with DW_OP_GNU_entry_value as missing in the main file
     #[structopt(long = "no-entry-value")]
     pub no_entry_value: bool,
@@ -252,7 +255,7 @@ impl<'a> UnitStats<'a> {
             VarType::Parameter => self.bundle.parameters += stats.clone(),
             VarType::Variable => self.bundle.variables += stats.clone(),
         }
-        if self.opt.variables {
+        if self.opt.variables || self.opt.lines {
             function_stats.variables.push(NamedVarStats {
                 inlines: subprogram_name_stack[i..]
                     .iter()
@@ -273,7 +276,7 @@ impl<'a> UnitStats<'a> {
     fn leave_noninline_function(&mut self) {
         if let Some(function_stats) = self.noninline_function_stack.pop().unwrap() {
             if function_stats.stats.instruction_bytes_in_scope > 0
-                && (self.opt.functions || self.opt.variables)
+                && (self.opt.functions || self.opt.variables || self.opt.lines)
             {
                 self.output.push(function_stats);
             }
