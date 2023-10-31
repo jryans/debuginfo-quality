@@ -760,6 +760,20 @@ fn main() -> Result<(), Box<dyn Error>> {
                     // scope_vars,
                 )?;
             }
+
+            if !stats.opt.tsv {
+                writeln!(&mut w)?;
+                writeln!(
+                    &mut w,
+                    "Lines with locatable variables: {}",
+                    locatable_vars_by_line.keys().len()
+                )?;
+                writeln!(
+                    &mut w,
+                    "Lines with scope variables: {}",
+                    scope_vars_by_line.keys().len()
+                )?;
+            }
         }
 
         writeln!(&mut w)?;
