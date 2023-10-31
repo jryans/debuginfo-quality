@@ -687,15 +687,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                             .as_ref()
                             .unwrap_or(&v.extra.source_line_set_covered);
                         for line in covered_line_set {
-                            let locatable_vars =
-                                locatable_vars_by_line.entry(line - 1).or_default();
+                            let locatable_vars = locatable_vars_by_line.entry(*line).or_default();
                             locatable_vars.insert(variable_description.clone());
                         }
                     }
                     if let Some(ref mut scope_vars_by_line) = scope_vars_by_line {
                         let scope_line_set = scope_line_set.as_ref().unwrap();
                         for line in scope_line_set {
-                            let scope_vars = scope_vars_by_line.entry(line - 1).or_default();
+                            let scope_vars = scope_vars_by_line.entry(*line).or_default();
                             scope_vars.insert(variable_description.clone());
                         }
                     }
@@ -749,7 +748,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     &mut w,
                     "{:12}\t{}\t{}",
                     // "{:12}\t{}: {:?}\t{}: {:?}",
-                    line + 1,
+                    line,
                     locatable_vars.map(|v| v.len()).unwrap_or_default(),
                     // locatable_vars,
                     scope_vars.map(|v| v.len()).unwrap_or_default(),
