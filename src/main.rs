@@ -1,5 +1,5 @@
 use std::borrow::{Borrow, Cow};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::error::Error;
 use std::fs;
 use std::io::{self, BufRead, BufWriter, Write};
@@ -356,11 +356,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Lines mode currently assumes debug info only knows about a single file
     let mut lines_src_file = None;
-    let mut locatable_vars_per_line: Option<Vec<HashSet<String>>> = None;
-    let mut scope_vars_per_line: Option<Vec<HashSet<String>>> = None;
+    let mut locatable_vars_by_line: Option<BTreeMap<u64, HashSet<String>>> = None;
+    let mut scope_vars_by_line: Option<BTreeMap<u64, HashSet<String>>> = None;
     if stats.opt.lines {
-        locatable_vars_per_line = Some(Vec::new());
-        scope_vars_per_line = Some(Vec::new());
+        locatable_vars_by_line = Some(BTreeMap::new());
+        scope_vars_by_line = Some(BTreeMap::new());
     }
 
     let stdout = io::stdout();
@@ -681,33 +681,21 @@ fn main() -> Result<(), Box<dyn Error>> {
                         // but presumably the NaN from N / 0 already suggests a problem.
                     }
 
-                    if let Some(ref mut locatable_vars_per_line) = locatable_vars_per_line {
+                    if let Some(ref mut locatable_vars_by_line) = locatable_vars_by_line {
                         // Use filtered set if it exists, otherwise fallback to basic coverage
                         let covered_line_set = source_line_set_filtered
                             .as_ref()
                             .unwrap_or(&v.extra.source_line_set_covered);
-                        // Ensure there are slots for all of this variable's lines
-                        locatable_vars_per_line.resize_with(
-                            locatable_vars_per_line
-                                .len()
-                                .max(*covered_line_set.last().unwrap_or(&0) as usize),
-                            Default::default,
-                        );
                         for line in covered_line_set {
-                            let locatable_vars = &mut locatable_vars_per_line[(line - 1) as usize];
+                            let locatable_vars =
+                                locatable_vars_by_line.entry(line - 1).or_default();
                             locatable_vars.insert(variable_description.clone());
                         }
                     }
-                    if let Some(ref mut scope_vars_per_line) = scope_vars_per_line {
+                    if let Some(ref mut scope_vars_by_line) = scope_vars_by_line {
                         let scope_line_set = scope_line_set.as_ref().unwrap();
-                        scope_vars_per_line.resize_with(
-                            scope_vars_per_line
-                                .len()
-                                .max(*scope_line_set.last().unwrap_or(&0) as usize),
-                            Default::default,
-                        );
                         for line in scope_line_set {
-                            let scope_vars = &mut scope_vars_per_line[(line - 1) as usize];
+                            let scope_vars = scope_vars_by_line.entry(line - 1).or_default();
                             scope_vars.insert(variable_description.clone());
                         }
                     }
@@ -750,25 +738,25 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
 
         if stats.opt.lines {
-            let mut locatable_vars_per_line = locatable_vars_per_line.unwrap();
-            let mut scope_vars_per_line = scope_vars_per_line.unwrap();
+            let locatable_vars_by_line = locatable_vars_by_line.unwrap();
+            let scope_vars_by_line = scope_vars_by_line.unwrap();
 
-            // Resize all arrays to same length
-            let lines = locatable_vars_per_line.len().max(scope_vars_per_line.len());
-            locatable_vars_per_line.resize_with(lines, Default::default);
-            scope_vars_per_line.resize_with(lines, Default::default);
+            // Union line sets to find all lines
+            let mut lines = BTreeSet::new();
+            lines.append(&mut locatable_vars_by_line.keys().cloned().collect());
+            lines.append(&mut scope_vars_by_line.keys().cloned().collect());
 
-            for line in 0..lines {
-                let locatable_vars = &locatable_vars_per_line[line];
-                let scope_vars = &scope_vars_per_line[line];
+            for line in lines {
+                let locatable_vars = locatable_vars_by_line.get(&line);
+                let scope_vars = scope_vars_by_line.get(&line);
                 writeln!(
                     &mut w,
                     "{:12}\t{}\t{}",
                     // "{:12}\t{}: {:?}\t{}: {:?}",
                     line + 1,
-                    locatable_vars.len(),
+                    locatable_vars.map(|v| v.len()).unwrap_or_default(),
                     // locatable_vars,
-                    scope_vars.len(),
+                    scope_vars.map(|v| v.len()).unwrap_or_default(),
                     // scope_vars,
                 )?;
             }
