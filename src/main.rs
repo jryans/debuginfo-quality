@@ -270,6 +270,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         bundle: StatsBundle::default(),
         opt: opt.clone(),
         output: Vec::new(),
+        lines: None,
     };
     let mut base_stats = None;
 
@@ -323,6 +324,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             bundle: StatsBundle::default(),
             opt: opt.clone(),
             output: Vec::new(),
+            lines: None,
         };
         evaluate_info(
             debug_info,
@@ -374,8 +376,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         // Line mode
         writeln!(
             &mut w,
-            "{:12}\t{:12}\t{:12}",
-            "Line", "Locatable (V)", "Scope (V)"
+            "{:12}\t{:12}\t{:12}\t{:12}",
+            "Line", "Present", "Locatable (V)", "Scope (V)"
         )?;
     } else {
         // Function / variable modes
@@ -737,6 +739,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
 
         if stats.opt.lines {
+            let lines_present = stats.lines.unwrap();
             let locatable_vars_by_line = locatable_vars_by_line.unwrap();
             let scope_vars_by_line = scope_vars_by_line.unwrap();
 
@@ -746,9 +749,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let scope_vars = scope_vars_by_line.get(line);
                 writeln!(
                     &mut w,
-                    "{:12}\t{:12}\t{:12}",
-                    // "{:12}\t{:12}: {:?}\t{:12}: {:?}",
+                    "{:12}\t{:12}\t{:12}\t{:12}",
+                    // "{:12}\t{:12}\t{:12}: {:?}\t{:12}: {:?}",
                     line,
+                    if lines_present.contains(line) { 1 } else { 0 },
                     locatable_vars.map(|v| v.len()).unwrap_or_default(),
                     // locatable_vars,
                     scope_vars.map(|v| v.len()).unwrap_or_default(),

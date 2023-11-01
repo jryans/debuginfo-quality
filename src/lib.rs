@@ -126,6 +126,7 @@ pub struct Stats {
     pub bundle: StatsBundle,
     pub opt: Opt,
     pub output: Vec<FunctionStats>,
+    pub lines: Option<BTreeSet<u64>>,
 }
 
 #[derive(Clone)]
@@ -159,11 +160,13 @@ struct UnitStats<'a> {
     opt: &'a Opt,
     noninline_function_stack: Vec<Option<FunctionStats>>,
     output: Vec<FunctionStats>,
+    lines: Option<BTreeSet<u64>>,
 }
 
 struct FinalUnitStats {
     bundle: StatsBundle,
     output: Vec<FunctionStats>,
+    lines: Option<BTreeSet<u64>>,
 }
 
 impl<'a> From<UnitStats<'a>> for FinalUnitStats {
@@ -171,6 +174,7 @@ impl<'a> From<UnitStats<'a>> for FinalUnitStats {
         FinalUnitStats {
             bundle: v.bundle,
             output: v.output,
+            lines: v.lines,
         }
     }
 }
@@ -182,11 +186,17 @@ impl Stats {
             opt: &self.opt,
             noninline_function_stack: Vec::new(),
             output: Vec::new(),
+            lines: None,
         }
     }
     fn accumulate(&mut self, mut stats: FinalUnitStats) {
         self.bundle += stats.bundle;
         self.output.append(&mut stats.output);
+        if let Some(lines) = &mut self.lines {
+            stats.lines.as_mut().map(|sl| lines.append(sl));
+        } else {
+            self.lines = stats.lines;
+        }
     }
 }
 
@@ -412,6 +422,28 @@ fn ranges_source_lines<R: Reader>(
     (source_line_set.len() as u64, source_line_set)
 }
 
+fn lines_present<R: Reader>(line_program: gimli::IncompleteLineNumberProgram<R>) -> BTreeSet<u64> {
+    let mut lines = BTreeSet::new();
+
+    let mut rows = line_program.rows();
+    while let Some((_, row)) = rows.next_row().unwrap() {
+        assert!(
+            row.file_index() == 1,
+            "Lines mode currently assumes a single source file"
+        );
+
+        // Only examine non-zero lines (DWARF lines are 1-based)
+        let line = match row.line() {
+            Some(line) => line,
+            None => continue,
+        };
+
+        lines.insert(line);
+    }
+
+    lines
+}
+
 fn sort_nonoverlapping(rs: &mut [gimli::Range]) {
     rs.sort_by_key(|r| r.begin);
     for r in 1..rs.len() {
@@ -628,6 +660,11 @@ pub fn evaluate_info<'a>(
                     .unwrap()
             })
             .expect("Debug info should have source line table");
+        unit_stats.lines = if stats.opt.lines {
+            Some(lines_present(line_program.clone()))
+        } else {
+            None
+        };
         let mut depth = 0;
         let mut scopes: Vec<(Vec<gimli::Range>, isize)> = Vec::new();
         let mut namespace_stack: Vec<(MaybeDemangle, isize, bool)> = Vec::new();
