@@ -180,6 +180,14 @@ impl<'a> From<UnitStats<'a>> for FinalUnitStats {
 }
 
 impl Stats {
+    pub fn new(opt: Opt) -> Stats {
+        Stats {
+            bundle: StatsBundle::default(),
+            opt,
+            output: Vec::new(),
+            lines: None,
+        }
+    }
     fn new_unit_stats(&self) -> UnitStats {
         UnitStats {
             bundle: StatsBundle::default(),

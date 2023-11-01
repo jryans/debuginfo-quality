@@ -266,12 +266,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         S::from(gimli::EndianSlice::new(data_ref, gimli::LittleEndian))
     }
 
-    let mut stats = Stats {
-        bundle: StatsBundle::default(),
-        opt: opt.clone(),
-        output: Vec::new(),
-        lines: None,
-    };
+    let mut stats = Stats::new(opt.clone());
     let mut base_stats = None;
 
     {
@@ -320,12 +315,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let loclists = &gimli::LocationLists::new(debug_loc, debug_loclists)?;
         let debug_line = &load_section(&arena, file);
 
-        let mut stats = Stats {
-            bundle: StatsBundle::default(),
-            opt: opt.clone(),
-            output: Vec::new(),
-            lines: None,
-        };
+        let mut stats = Stats::new(opt.clone());
         evaluate_info(
             debug_info,
             debug_abbrev,
