@@ -746,8 +746,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let scope_vars = scope_vars_by_line.get(line);
                 writeln!(
                     &mut w,
-                    "{:12}\t{}\t{}",
-                    // "{:12}\t{}: {:?}\t{}: {:?}",
+                    "{:12}\t{:12}\t{:12}",
+                    // "{:12}\t{:12}: {:?}\t{:12}: {:?}",
                     line,
                     locatable_vars.map(|v| v.len()).unwrap_or_default(),
                     // locatable_vars,
