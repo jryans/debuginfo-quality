@@ -402,8 +402,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         // Line mode
         writeln!(
             &mut w,
-            "{:12}\t{:12}\t{:12}\t{:12}",
-            "Line", "Present", "Locatable (V)", "Scope (V)"
+            "{:12}\t{:12}\t{:12}\t{:12}\t{:12}",
+            "Line", "Present", "Reachable", "Locatable (V)", "Scope (V)"
         )?;
     } else {
         // Function / variable modes
@@ -466,6 +466,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             };
 
         functions.sort_by(|a, b| goodness(a).partial_cmp(&goodness(b)).unwrap());
+
+        // TODO: Support multiple source files in line mode
+        let mut cachegrind_line_set = None;
 
         for (function_stats, base_function_stats) in functions {
             if stats.opt.variables || stats.opt.lines {
@@ -591,7 +594,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let mut source_line_set_filtered = None;
                     let mut computation_line_set = None;
                     let mut first_defined_line = None;
-                    let mut cachegrind_line_set = None;
                     if filtering_by_regions {
                         source_line_set_filtered = Some(v.extra.source_line_set_covered.clone());
 
@@ -692,17 +694,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 });
                             }
                         }
-                        if stats.opt.only_cachegrind_regions {
-                            if let Some(cachegrind_line_set) = cachegrind_line_set {
-                                scope_line_set = scope_line_set.map(|set| {
-                                    set.intersection(cachegrind_line_set).cloned().collect()
-                                });
-                            } else {
-                                scope_line_set.as_mut().map(|set| {
-                                    set.clear();
-                                });
-                            }
-                        }
                         src_scope_lines =
                             Some(scope_line_set.as_ref().map_or(0, |set| set.len() as u64));
                     }
@@ -794,19 +785,22 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         if stats.opt.lines {
             let lines_present = stats.lines.unwrap();
+            let lines_reachable = cachegrind_line_set;
             let locatable_vars_by_line = locatable_vars_by_line.unwrap();
             let scope_vars_by_line = scope_vars_by_line.unwrap();
 
             // Lines must be part of scope set to count, so use this to iterate the other sets
             for line in scope_vars_by_line.keys() {
+                let line_reachable = lines_reachable.map_or(true, |lr| lr.contains(line));
                 let locatable_vars = locatable_vars_by_line.get(line);
                 let scope_vars = scope_vars_by_line.get(line);
                 writeln!(
                     &mut w,
-                    "{:12}\t{:12}\t{:12}\t{:12}",
-                    // "{:12}\t{:12}\t{:12}: {:?}\t{:12}: {:?}",
+                    "{:12}\t{:12}\t{:12}\t{:12}\t{:12}",
+                    // "{:12}\t{:12}\t{:12}\t{:12}: {:?}\t{:12}: {:?}",
                     line,
                     if lines_present.contains(line) { 1 } else { 0 },
+                    if line_reachable { 1 } else { 0 },
                     locatable_vars.map(|v| v.len()).unwrap_or_default(),
                     // locatable_vars,
                     scope_vars.map(|v| v.len()).unwrap_or_default(),
