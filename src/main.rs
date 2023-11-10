@@ -673,6 +673,15 @@ fn main() -> Result<(), Box<dyn Error>> {
                         // but presumably the NaN from N / 0 already suggests a problem.
                     }
 
+                    // if variable_description.starts_with("") {
+                    //     println!("Variable: {}", variable_description);
+                    //     println!("Covered line set: {:?}", v.extra.source_line_set_covered);
+                    //     println!("Computation line set: {:?}", computation_line_set);
+                    //     println!("First defined line: {:?}", first_defined_line);
+                    //     println!("Scope line set: {:?}", scope_line_set);
+                    //     println!("Filtered line set: {:?}", source_line_set_filtered);
+                    // }
+
                     if let Some(ref mut locatable_vars_by_line) = locatable_vars_by_line {
                         // Use filtered set if it exists, otherwise fallback to basic coverage
                         let covered_line_set = source_line_set_filtered
@@ -690,15 +699,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                             scope_vars.insert(variable_description.clone());
                         }
                     }
-
-                    // if variable_description.starts_with("") {
-                    //     println!("Variable: {}", variable_description);
-                    //     println!("Covered line set: {:?}", v.extra.source_line_set_covered);
-                    //     println!("Computation line set: {:?}", computation_line_set);
-                    //     println!("First defined line: {:?}", first_defined_line);
-                    //     println!("Scope line set: {:?}", scope_line_set);
-                    //     println!("Filtered line set: {:?}", source_line_set_filtered);
-                    // }
 
                     if stats.opt.variables {
                         write_stats(
