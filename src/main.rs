@@ -235,6 +235,38 @@ fn scope_line_sets_by_variable(regions: &Vec<Region>) -> HashMap<String, BTreeSe
     line_sets_by_variable
 }
 
+fn cachegrind_line_sets_by_file(bytes: &[u8]) -> HashMap<String, BTreeSet<u64>> {
+    let mut line_sets_by_file = HashMap::new();
+
+    let mut file = None;
+
+    for cg_line in bytes.lines() {
+        let cg_line = cg_line.unwrap();
+
+        let mut parts = cg_line.split('=');
+        if parts.next() == Some("fl") {
+            file = parts.next().map(|s| s.to_owned());
+            // println!("File: {:?}", &file);
+            continue;
+        }
+
+        parts = cg_line.split(' ');
+        let line = parts.next().unwrap().parse::<u64>();
+        if let Ok(line) = line {
+            if line == 0 {
+                continue;
+            }
+            let file = file.clone().unwrap();
+            let line_set: &mut BTreeSet<u64> = line_sets_by_file.entry(file).or_default();
+            line_set.insert(line);
+            // println!("Line: {}", &line);
+            continue;
+        }
+    }
+
+    line_sets_by_file
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let opt = Opt::from_args();
     if opt.baseline.is_none() && (opt.no_entry_value_baseline || opt.no_parameter_ref_baseline) {
@@ -342,9 +374,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         .as_ref()
         .map(|r| scope_line_sets_by_variable(r.as_ref().unwrap()));
 
+    let cachegrind_map = opt.cachegrind.as_ref().map(|path| map(path));
+    let cachegrind_line_sets_by_file = cachegrind_map.map(|c| cachegrind_line_sets_by_file(&c));
+
     let adjusting_by_baseline = stats.opt.range_start_baseline || stats.opt.extend_from_baseline;
-    let filtering_by_regions =
-        stats.opt.only_computation_regions || stats.opt.range_start_first_defined_region;
+    let filtering_by_regions = stats.opt.only_computation_regions
+        || stats.opt.range_start_first_defined_region
+        || stats.opt.only_cachegrind_regions;
 
     // Lines mode currently assumes debug info only knows about a single file
     let mut lines_src_file = None;
@@ -555,21 +591,24 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let mut source_line_set_filtered = None;
                     let mut computation_line_set = None;
                     let mut first_defined_line = None;
+                    let mut cachegrind_line_set = None;
                     if filtering_by_regions {
                         source_line_set_filtered = Some(v.extra.source_line_set_covered.clone());
+
+                        // Some paths are already absolute, others are relative to compilation
+                        let mut decl_file_path = if Path::new(&v.decl_dir).is_absolute() {
+                            Path::new(&v.decl_dir).join(&v.decl_file)
+                        } else {
+                            Path::new(&function_stats.unit_dir)
+                                .join(&v.decl_dir)
+                                .join(&v.decl_file)
+                        };
+                        // Normalise on insert and access to allow for relative paths
+                        decl_file_path = decl_file_path.absolutize().unwrap().to_path_buf();
+
                         if stats.opt.only_computation_regions {
                             let computation_line_sets_by_file =
                                 computation_line_sets_by_file.as_ref().unwrap();
-                            // Some paths are already absolute, others are relative to compilation
-                            let mut decl_file_path = if Path::new(&v.decl_dir).is_absolute() {
-                                Path::new(&v.decl_dir).join(&v.decl_file)
-                            } else {
-                                Path::new(&function_stats.unit_dir)
-                                    .join(&v.decl_dir)
-                                    .join(&v.decl_file)
-                            };
-                            // Normalise on insert and access to allow for relative paths
-                            decl_file_path = decl_file_path.absolutize().unwrap().to_path_buf();
                             // if variable_description.starts_with("") {
                             //     println!("Unit dir: {}", function_stats.unit_dir);
                             //     println!("Decl dir: {}", v.decl_dir);
@@ -603,6 +642,19 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 });
                             }
                         }
+                        if stats.opt.only_cachegrind_regions {
+                            let cachegrind_line_sets_by_file =
+                                cachegrind_line_sets_by_file.as_ref().unwrap();
+                            cachegrind_line_set =
+                                cachegrind_line_sets_by_file.get(decl_file_path.to_str().unwrap());
+                            if let Some(cachegrind_line_set) = cachegrind_line_set {
+                                source_line_set_filtered = source_line_set_filtered.map(|set| {
+                                    set.intersection(cachegrind_line_set).cloned().collect()
+                                });
+                            } else {
+                                source_line_set_filtered.as_mut().map(|set| set.clear());
+                            }
+                        }
                         v_stats_filtered = source_line_set_filtered
                             .as_ref()
                             .map(|set| set.len() as u64);
@@ -633,6 +685,17 @@ fn main() -> Result<(), Box<dyn Error>> {
                                     while set.first().unwrap_or(&u64::MAX) < first_defined_line {
                                         set.pop_first();
                                     }
+                                });
+                            } else {
+                                scope_line_set.as_mut().map(|set| {
+                                    set.clear();
+                                });
+                            }
+                        }
+                        if stats.opt.only_cachegrind_regions {
+                            if let Some(cachegrind_line_set) = cachegrind_line_set {
+                                scope_line_set = scope_line_set.map(|set| {
+                                    set.intersection(cachegrind_line_set).cloned().collect()
                                 });
                             } else {
                                 scope_line_set.as_mut().map(|set| {
@@ -678,6 +741,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     //     println!("Covered line set: {:?}", v.extra.source_line_set_covered);
                     //     println!("Computation line set: {:?}", computation_line_set);
                     //     println!("First defined line: {:?}", first_defined_line);
+                    //     println!("Cachegrind line set: {:?}", cachegrind_line_set);
                     //     println!("Scope line set: {:?}", scope_line_set);
                     //     println!("Filtered line set: {:?}", source_line_set_filtered);
                     // }

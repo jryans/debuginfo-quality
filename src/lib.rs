@@ -100,16 +100,22 @@ pub struct Opt {
     #[structopt(long = "regions", parse(from_os_str))]
     pub regions: Option<PathBuf>,
     /// Report source-based scope lines from declaration regions.
-    /// This will be further filtered by computation and definition regions if they are enabled.
+    /// This will be further filtered by other regions if they are enabled.
     #[structopt(long = "scope-regions")]
     pub scope_regions: bool,
-    /// Filters covered lines to only those within computation regions.
+    /// Filters lines to only those within computation regions.
     #[structopt(long = "only-computation-regions")]
     pub only_computation_regions: bool,
     /// The first region where a given variable must be defined determines the start of the
     /// covered source line range.
     #[structopt(long = "range-start-first-defined-region")]
     pub range_start_first_defined_region: bool,
+    /// Cachegrind profile used to filter the covered lines in some way.
+    #[structopt(long = "cachegrind", parse(from_os_str))]
+    pub cachegrind: Option<PathBuf>,
+    /// Filters lines to only those within cachegrind-profiled regions.
+    #[structopt(long = "only-cachegrind-regions")]
+    pub only_cachegrind_regions: bool,
     /// File to analyze
     #[structopt(parse(from_os_str))]
     pub file: PathBuf,
