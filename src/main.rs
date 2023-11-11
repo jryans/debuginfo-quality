@@ -267,6 +267,43 @@ fn cachegrind_line_sets_by_file(bytes: &[u8]) -> HashMap<String, BTreeSet<u64>> 
     line_sets_by_file
 }
 
+fn scope_line_set_for_variable(
+    opt: &Opt,
+    scope_line_sets_by_variable: &Option<HashMap<String, BTreeSet<u64>>>,
+    variable_description: &String,
+    computation_line_set: Option<&BTreeSet<u64>>,
+    first_defined_line: Option<&u64>,
+) -> Option<BTreeSet<u64>> {
+    let scope_line_sets_by_variable = scope_line_sets_by_variable.as_ref().unwrap();
+    let mut scope_line_set = scope_line_sets_by_variable
+        .get(variable_description)
+        .cloned();
+    if opt.only_computation_regions {
+        if let Some(computation_line_set) = computation_line_set {
+            scope_line_set =
+                scope_line_set.map(|set| set.intersection(computation_line_set).cloned().collect());
+        } else {
+            scope_line_set.as_mut().map(|set| {
+                set.clear();
+            });
+        }
+    }
+    if opt.range_start_first_defined_region {
+        if let Some(first_defined_line) = first_defined_line {
+            scope_line_set.as_mut().map(|set| {
+                while set.first().unwrap_or(&u64::MAX) < first_defined_line {
+                    set.pop_first();
+                }
+            });
+        } else {
+            scope_line_set.as_mut().map(|set| {
+                set.clear();
+            });
+        }
+    }
+    scope_line_set
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let opt = Opt::from_args();
     if opt.baseline.is_none() && (opt.no_entry_value_baseline || opt.no_parameter_ref_baseline) {
@@ -665,35 +702,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let mut src_scope_lines = None;
                     let mut scope_line_set = None;
                     if stats.opt.scope_regions {
-                        let scope_line_sets_by_variable =
-                            scope_line_sets_by_variable.as_ref().unwrap();
-                        scope_line_set = scope_line_sets_by_variable
-                            .get(&variable_description)
-                            .cloned();
-                        if stats.opt.only_computation_regions {
-                            if let Some(computation_line_set) = computation_line_set {
-                                scope_line_set = scope_line_set.map(|set| {
-                                    set.intersection(computation_line_set).cloned().collect()
-                                });
-                            } else {
-                                scope_line_set.as_mut().map(|set| {
-                                    set.clear();
-                                });
-                            }
-                        }
-                        if stats.opt.range_start_first_defined_region {
-                            if let Some(first_defined_line) = first_defined_line {
-                                scope_line_set.as_mut().map(|set| {
-                                    while set.first().unwrap_or(&u64::MAX) < first_defined_line {
-                                        set.pop_first();
-                                    }
-                                });
-                            } else {
-                                scope_line_set.as_mut().map(|set| {
-                                    set.clear();
-                                });
-                            }
-                        }
+                        scope_line_set = scope_line_set_for_variable(
+                            &stats.opt,
+                            &scope_line_sets_by_variable,
+                            &variable_description,
+                            computation_line_set,
+                            first_defined_line,
+                        );
                         src_scope_lines =
                             Some(scope_line_set.as_ref().map_or(0, |set| set.len() as u64));
                     }
