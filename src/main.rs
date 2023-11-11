@@ -304,6 +304,17 @@ fn scope_line_set_for_variable(
     scope_line_set
 }
 
+fn goodness(&(ref a, ref a_base): &(FunctionStats, Option<&FunctionStats>)) -> (f64, i64) {
+    (
+        if let Some(a_base) = a_base.as_ref() {
+            a.stats.fraction_bytes_covered() - a_base.stats.fraction_bytes_covered()
+        } else {
+            a.stats.fraction_bytes_covered()
+        },
+        -(a.stats.instruction_bytes_in_scope as i64),
+    )
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let opt = Opt::from_args();
     if opt.baseline.is_none() && (opt.no_entry_value_baseline || opt.no_parameter_ref_baseline) {
@@ -920,15 +931,4 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
-}
-
-fn goodness(&(ref a, ref a_base): &(FunctionStats, Option<&FunctionStats>)) -> (f64, i64) {
-    (
-        if let Some(a_base) = a_base.as_ref() {
-            a.stats.fraction_bytes_covered() - a_base.stats.fraction_bytes_covered()
-        } else {
-            a.stats.fraction_bytes_covered()
-        },
-        -(a.stats.instruction_bytes_in_scope as i64),
-    )
 }
