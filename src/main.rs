@@ -870,6 +870,20 @@ fn main() -> Result<(), Box<dyn Error>> {
                         let missing_variables =
                             expected_variables.difference(encountered_variables);
                         for variable_description in missing_variables {
+                            if stats.opt.only_locals {
+                                let var_name = variable_description.split(", ").nth(1).unwrap();
+                                // Borrow ASPLOS name filter for now
+                                // x.startswith('l') or x in ['i', 'j', 'k', 'print_hash_value']
+                                // TODO: Emit local vs. parameter in source analysis
+                                if !var_name.starts_with("l")
+                                    && var_name != "i"
+                                    && var_name != "j"
+                                    && var_name != "k"
+                                    && var_name != "print_hash_value"
+                                {
+                                    continue;
+                                }
+                            }
                             let mut computation_line_set = None;
                             let mut first_defined_line = None;
                             if stats.opt.only_computation_regions {
