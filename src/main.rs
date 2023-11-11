@@ -816,9 +816,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .intersection(computation_line_set.unwrap())
                     .cloned()
                     .collect();
-                let first_defined_line = first_defined_line_by_variable.get(variable).unwrap();
-                while variable_scope_lines.first().unwrap_or(&u64::MAX) < first_defined_line {
-                    variable_scope_lines.pop_first();
+                let first_defined_line = first_defined_line_by_variable.get(variable);
+                if let Some(first_defined_line) = first_defined_line {
+                    while variable_scope_lines.first().unwrap_or(&u64::MAX) < first_defined_line {
+                        variable_scope_lines.pop_first();
+                    }
+                } else {
+                    variable_scope_lines.clear();
                 }
                 report_scope_lines.append(&mut variable_scope_lines);
             }
