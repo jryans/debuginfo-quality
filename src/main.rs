@@ -235,6 +235,31 @@ fn scope_line_sets_by_variable(regions: &Vec<Region>) -> HashMap<String, BTreeSe
     line_sets_by_variable
 }
 
+fn variables_by_function(regions: &Vec<Region>) -> HashMap<(String, String), HashSet<String>> {
+    let mut variables_by_function = HashMap::new();
+
+    for region in regions {
+        if region.kind != RegionKind::DeclScope {
+            continue;
+        }
+
+        // TODO: Likely needs special handling for languages like C++ that could have multiple of
+        // same function name in the same source file
+        let variable = region.detail.clone();
+        let mut parts = variable.split(", ");
+        let leaf_function_name = parts.next().unwrap().to_owned();
+        let decl = parts.nth(1).unwrap();
+        let decl_file = decl.split(':').next().unwrap().to_owned();
+
+        let variable_set: &mut HashSet<String> = variables_by_function
+            .entry((leaf_function_name, decl_file))
+            .or_default();
+        variable_set.insert(variable);
+    }
+
+    variables_by_function
+}
+
 fn cachegrind_line_sets_by_file(bytes: &[u8]) -> HashMap<String, BTreeSet<u64>> {
     let mut line_sets_by_file = HashMap::new();
 
@@ -421,6 +446,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let scope_line_sets_by_variable = regions
         .as_ref()
         .map(|r| scope_line_sets_by_variable(r.as_ref().unwrap()));
+    let variables_by_function = regions
+        .as_ref()
+        .map(|r| variables_by_function(r.as_ref().unwrap()));
 
     let cachegrind_map = opt.cachegrind.as_ref().map(|path| map(path));
     let cachegrind_line_sets_by_file = cachegrind_map.map(|c| cachegrind_line_sets_by_file(&c));
@@ -518,9 +546,22 @@ fn main() -> Result<(), Box<dyn Error>> {
         // TODO: Support multiple source files in line mode
         let mut cachegrind_line_set = None;
 
+        // TODO: Supplement function list using source analysis when present
+        // This would allow reporting status of variables from functions not emitted in DWARF
         for (function_stats, base_function_stats) in functions {
             if stats.opt.variables || stats.opt.lines {
                 let unit_name = function_stats.unit_name.clone();
+
+                // Track variables we encountered
+                // This allows a later stage to compare this with source analysis and
+                // report any that may not have been emitted in DWARF
+                let mut encountered_variables_by_function: Option<
+                    HashMap<(String, Vec<String>, String), HashSet<String>>,
+                > = None;
+                if stats.opt.scope_regions {
+                    encountered_variables_by_function = Some(HashMap::new());
+                }
+
                 for v in function_stats.variables {
                     // Check declaration file in lines mode
                     if stats.opt.lines {
@@ -560,7 +601,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     // Matching with source analysis uses the function containing the variable
                     // Without inlining, there's only one function, so the answer is clear.
                     // With inlining, we want the leaf function name at the end of the inlines.
-                    let mut variable_description = leaf_function_name;
+                    let mut variable_description = leaf_function_name.clone();
                     // Source analysis can't produce a consistent unit name
                     // Rely on absolute file paths below to distinguish similarly named files
                     // in different parts of a codebase
@@ -573,6 +614,32 @@ fn main() -> Result<(), Box<dyn Error>> {
                     // Add unit name alongside inline ancestors to distinguish per-unit instances
                     let mut instance_segments = vec![function_stats.unit_name.clone()];
                     instance_segments.append(&mut inline_ancestors);
+
+                    // TODO: if filtering_by_regions {
+                    // Some paths are already absolute, others are relative to compilation
+                    let mut decl_file_path_buf = if Path::new(&v.decl_dir).is_absolute() {
+                        Path::new(&v.decl_dir).join(&v.decl_file)
+                    } else {
+                        Path::new(&function_stats.unit_dir)
+                            .join(&v.decl_dir)
+                            .join(&v.decl_file)
+                    };
+                    // Normalise on insert and access to allow for relative paths
+                    decl_file_path_buf = decl_file_path_buf.absolutize().unwrap().to_path_buf();
+                    let decl_file_path = decl_file_path_buf.to_str().unwrap();
+                    // }
+
+                    // Mark this variable as encountered
+                    if let Some(ref mut encountered_variables) = encountered_variables_by_function {
+                        let variable_set = encountered_variables
+                            .entry((
+                                leaf_function_name.clone(),
+                                instance_segments.clone(),
+                                decl_file_path.to_owned(),
+                            ))
+                            .or_default();
+                        variable_set.insert(variable_description.clone());
+                    }
 
                     if stats.opt.variables {
                         write!(
@@ -644,18 +711,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let mut first_defined_line = None;
                     if filtering_by_regions {
                         source_line_set_filtered = Some(v.extra.source_line_set_covered.clone());
-
-                        // Some paths are already absolute, others are relative to compilation
-                        let mut decl_file_path = if Path::new(&v.decl_dir).is_absolute() {
-                            Path::new(&v.decl_dir).join(&v.decl_file)
-                        } else {
-                            Path::new(&function_stats.unit_dir)
-                                .join(&v.decl_dir)
-                                .join(&v.decl_file)
-                        };
-                        // Normalise on insert and access to allow for relative paths
-                        decl_file_path = decl_file_path.absolutize().unwrap().to_path_buf();
-
                         if stats.opt.only_computation_regions {
                             let computation_line_sets_by_file =
                                 computation_line_sets_by_file.as_ref().unwrap();
@@ -666,7 +721,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                             //     println!("Decl file path: {}", decl_file_path.to_str().unwrap());
                             // }
                             computation_line_set =
-                                computation_line_sets_by_file.get(decl_file_path.to_str().unwrap());
+                                computation_line_sets_by_file.get(decl_file_path);
                             if let Some(computation_line_set) = computation_line_set {
                                 source_line_set_filtered = source_line_set_filtered.map(|set| {
                                     set.intersection(computation_line_set).cloned().collect()
@@ -695,8 +750,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         if stats.opt.only_cachegrind_regions {
                             let cachegrind_line_sets_by_file =
                                 cachegrind_line_sets_by_file.as_ref().unwrap();
-                            cachegrind_line_set =
-                                cachegrind_line_sets_by_file.get(decl_file_path.to_str().unwrap());
+                            cachegrind_line_set = cachegrind_line_sets_by_file.get(decl_file_path);
                             if let Some(cachegrind_line_set) = cachegrind_line_set {
                                 source_line_set_filtered = source_line_set_filtered.map(|set| {
                                     set.intersection(cachegrind_line_set).cloned().collect()
@@ -790,6 +844,90 @@ fn main() -> Result<(), Box<dyn Error>> {
                             v_stats_filtered,
                             src_scope_lines,
                         );
+                    }
+                }
+
+                // Look for any variables in source analysis that we did not encounter
+                if let Some(ref encountered_variables_bf) = encountered_variables_by_function {
+                    for key in encountered_variables_bf.keys() {
+                        let (leaf_function_name, instance_segments, decl_file_path) = key;
+                        let encountered_variables = encountered_variables_bf.get(key).unwrap();
+                        // Borrow the declaration file from the first variable
+                        let first_variable = encountered_variables.iter().next().unwrap();
+                        let decl_file = first_variable
+                            .split(", ")
+                            .nth(2)
+                            .unwrap()
+                            .split(":")
+                            .next()
+                            .unwrap()
+                            .to_owned();
+                        let expected_variables = variables_by_function
+                            .as_ref()
+                            .unwrap()
+                            .get(&(leaf_function_name.clone(), decl_file))
+                            .unwrap();
+                        let missing_variables =
+                            expected_variables.difference(encountered_variables);
+                        for variable_description in missing_variables {
+                            let mut computation_line_set = None;
+                            let mut first_defined_line = None;
+                            if stats.opt.only_computation_regions {
+                                let computation_line_sets_by_file =
+                                    computation_line_sets_by_file.as_ref().unwrap();
+                                computation_line_set =
+                                    computation_line_sets_by_file.get(decl_file_path);
+                            }
+                            if stats.opt.range_start_first_defined_region {
+                                let first_defined_line_by_variable =
+                                    first_defined_line_by_variable.as_ref().unwrap();
+                                first_defined_line =
+                                    first_defined_line_by_variable.get(variable_description);
+                            }
+                            let scope_line_set = scope_line_set_for_variable(
+                                &stats.opt,
+                                &scope_line_sets_by_variable,
+                                &variable_description,
+                                computation_line_set,
+                                first_defined_line,
+                            );
+                            let src_scope_lines =
+                                scope_line_set.as_ref().map_or(0, |set| set.len() as u64);
+                            // println!(
+                            //     "Missing variable: {}, instance: {}, lines: {}",
+                            //     variable_description,
+                            //     instance_segments.join(", "),
+                            //     &src_scope_lines,
+                            // );
+                            if stats.opt.variables {
+                                write!(
+                                    &mut w,
+                                    "{}\t{}",
+                                    &variable_description,
+                                    instance_segments.join(", "),
+                                )?;
+                                write_stats(
+                                    &mut w,
+                                    &VariableStats {
+                                        instruction_bytes_in_scope: 0,
+                                        instruction_bytes_covered: 0,
+                                        source_lines_in_scope: 0,
+                                        source_lines_covered: 0,
+                                    },
+                                    None,
+                                    if adjusting_by_baseline { Some(0) } else { None },
+                                    if filtering_by_regions { Some(0) } else { None },
+                                    Some(src_scope_lines),
+                                );
+                            }
+                            if let Some(ref mut scope_vars_by_line) = scope_vars_by_line {
+                                let scope_line_set = scope_line_set.as_ref().unwrap();
+                                for line in scope_line_set {
+                                    let scope_vars = scope_vars_by_line.entry(*line).or_default();
+                                    scope_vars.insert(variable_description.clone());
+                                }
+                            }
+                        }
                     }
                 }
             } else {
