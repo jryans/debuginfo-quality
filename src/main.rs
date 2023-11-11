@@ -784,13 +784,52 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
 
         if stats.opt.lines {
+            // TODO: Support multiple source files in line mode
+            let mut computation_line_set = None;
+            let computation_line_sets_by_file = computation_line_sets_by_file.as_ref().unwrap();
+            // Filter to file for ASPLOS test cases
+            for file in computation_line_sets_by_file.keys() {
+                if !file.ends_with("a.c") {
+                    continue;
+                }
+                computation_line_set = computation_line_sets_by_file.get(file);
+            }
+
+            // Gather all lines for local variables found via source analysis
+            // Can't depend on DWARF here, as some variable may not be emitted
+            let mut report_scope_lines = BTreeSet::new();
+            // TODO: Check options appropriately
+            let scope_line_sets_by_variable = scope_line_sets_by_variable.as_ref().unwrap();
+            let first_defined_line_by_variable = first_defined_line_by_variable.as_ref().unwrap();
+            for variable in scope_line_sets_by_variable.keys() {
+                let mut variable_parts = variable.split(", ");
+                let function = variable_parts.next().unwrap();
+
+                // ASPLOS considers only functions with `main` or starting with `func`
+                if !function.contains("main") && !function.starts_with("func") {
+                    continue;
+                }
+
+                let mut variable_scope_lines =
+                    scope_line_sets_by_variable.get(variable).unwrap().clone();
+                variable_scope_lines = variable_scope_lines
+                    .intersection(computation_line_set.unwrap())
+                    .cloned()
+                    .collect();
+                let first_defined_line = first_defined_line_by_variable.get(variable).unwrap();
+                while variable_scope_lines.first().unwrap_or(&u64::MAX) < first_defined_line {
+                    variable_scope_lines.pop_first();
+                }
+                report_scope_lines.append(&mut variable_scope_lines);
+            }
+
             let lines_present = stats.lines.unwrap();
             let lines_reachable = cachegrind_line_set;
             let locatable_vars_by_line = locatable_vars_by_line.unwrap();
             let scope_vars_by_line = scope_vars_by_line.unwrap();
 
-            // Lines must be part of scope set to count, so use this to iterate the other sets
-            for line in scope_vars_by_line.keys() {
+            // Iterate through source analysis lines gathered above
+            for ref line in report_scope_lines {
                 let line_reachable = lines_reachable.map_or(true, |lr| lr.contains(line));
                 let locatable_vars = locatable_vars_by_line.get(line);
                 let scope_vars = scope_vars_by_line.get(line);
