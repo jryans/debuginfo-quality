@@ -502,11 +502,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                     // Separate any inline ancestors from the leaf function that contains the
                     // variable at the source level
-                    let (mut inline_ancestors, leaf_function_name) = {
+                    let (leaf_function_name, mut inline_ancestors) = {
                         let mut names = vec![function_stats.name.clone()];
                         names.append(&mut v.inlines.clone());
                         let leaf = names.pop().unwrap();
-                        (names, leaf)
+                        (leaf, names)
                     };
 
                     // Matching with source analysis uses the function containing the variable
