@@ -862,6 +862,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                             .next()
                             .unwrap()
                             .to_owned();
+                        // TODO: Figure out some kind of file for such cases
+                        if decl_file.contains("<unknown file>") {
+                            continue;
+                        }
                         let expected_variables = variables_by_function
                             .as_ref()
                             .unwrap()
