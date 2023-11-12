@@ -869,10 +869,18 @@ fn main() -> Result<(), Box<dyn Error>> {
                         let expected_variables = variables_by_function
                             .as_ref()
                             .unwrap()
-                            .get(&(leaf_function_name.clone(), decl_file))
-                            .unwrap();
-                        let missing_variables =
-                            expected_variables.difference(encountered_variables);
+                            .get(&(leaf_function_name.clone(), decl_file.clone()));
+                        // TODO: Work out what's happening here (see `tar`)
+                        if expected_variables.is_none() {
+                            // println!(
+                            //     "No expected variables for {}, {}",
+                            //     leaf_function_name, &decl_file,
+                            // );
+                            continue;
+                        }
+                        let missing_variables = expected_variables
+                            .unwrap()
+                            .difference(encountered_variables);
                         for variable_description in missing_variables {
                             if stats.opt.only_locals {
                                 let var_name = variable_description.split(", ").nth(1).unwrap();
