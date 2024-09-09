@@ -719,15 +719,27 @@ pub fn evaluate_info<'a>(
                 let mut bytes_ranges = rs.collect::<Vec<_>>().unwrap();
                 sort_nonoverlapping(&mut bytes_ranges);
                 scopes.push((bytes_ranges, depth));
-            } else if let Some(AttributeValue::Udata(data)) =
+            } else if let Some(AttributeValue::Udata(offset)) =
                 entry.attr_value(gimli::DW_AT_high_pc).unwrap()
             {
-                if let Some(gimli::AttributeValue::Addr(addr)) =
+                if let Some(gimli::AttributeValue::Addr(low)) =
                     entry.attr_value(gimli::DW_AT_low_pc).unwrap()
                 {
                     let bytes_range = gimli::Range {
-                        begin: addr,
-                        end: addr + data,
+                        begin: low,
+                        end: low + offset,
+                    };
+                    scopes.push((vec![bytes_range], depth));
+                }
+            } else if let Some(AttributeValue::Addr(high)) =
+                entry.attr_value(gimli::DW_AT_high_pc).unwrap()
+            {
+                if let Some(gimli::AttributeValue::Addr(low)) =
+                    entry.attr_value(gimli::DW_AT_low_pc).unwrap()
+                {
+                    let bytes_range = gimli::Range {
+                        begin: low,
+                        end: high,
                     };
                     scopes.push((vec![bytes_range], depth));
                 }
