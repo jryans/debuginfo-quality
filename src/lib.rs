@@ -569,7 +569,9 @@ where
         unit,
         entry,
         abbrevs,
-        &[gimli::DW_AT_linkage_name, gimli::DW_AT_name],
+        // TODO: Perhaps re-enable `DW_AT_linkage_name` when testing C++ programs
+        // Need to weave language into demangling path so that it only runs for C++
+        &[gimli::DW_AT_name],
     );
     match result {
         Some((gimli::DW_AT_linkage_name, gimli::AttributeValue::String(string))) => {
